@@ -3,6 +3,7 @@ import Page from '../../layouts/Page.astro';
 import { APK_URL, formatDate } from '../../i18n';
 import { releases } from '../../releases';
 import Screenshots from '../../components/Screenshots.astro';
+import CarAudio from '../../components/CarAudio.astro';
 
 // The newest release, shown under the download button.
 const [latest] = await releases('zh');
@@ -26,6 +27,7 @@ const [latest] = await releases('zh');
         <a class="btn btn-ghost" href="https://github.com/weenas/castbay">
           查看源码
         </a>
+        <a class="btn btn-ghost" href="#car-audio">了解车载音乐</a>
       </div>
       <p class="note">
         版本 {latest.data.version} · {formatDate('zh', latest.data.date)} · <a href="/zh/changelog">更新内容</a><br>
@@ -60,7 +62,7 @@ const [latest] = await releases('zh');
         <article class="card">
           <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
           <h3>音乐</h3>
-          <p>专辑封面模糊背景、滚动歌词（可选）、圆形播放控制。AirPlay 音乐以无损 ALAC 播放，像 Apple TV 一样按手机的时间播出，歌词始终同步。</p>
+          <p>专辑封面模糊背景、可选的滚动歌词和播放控制。支持通过 AirPlay 接收 ALAC 音频，实际格式与音质取决于发送端和音频输出链路。<a href="#car-audio">了解车载音乐与音质说明</a>。</p>
         </article>
         <article class="card">
           <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg></div>
@@ -86,7 +88,9 @@ const [latest] = await releases('zh');
     </div>
   </section>
 
-  <section id="screens" class="alt">
+  <CarAudio lang="zh" />
+
+  <section id="screens">
     <div class="wrap">
       <div class="section-head">
         <h2>在电视上的样子</h2>
@@ -132,7 +136,7 @@ const [latest] = await releases('zh');
           <ul>
             <li>入口：控制中心的"屏幕镜像"，或 App 里的 AirPlay 图标</li>
             <li>支持屏幕镜像、音乐、视频</li>
-            <li>音乐无损传输；可在电视上切换上一首、下一首</li>
+            <li>支持接收 ALAC 音频；可在电视上切换上一首、下一首</li>
           </ul>
         </div>
         <div class="card">

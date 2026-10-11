@@ -1,0 +1,77 @@
+---
+import type { Lang } from '../i18n';
+
+const { lang } = Astro.props as { lang: Lang };
+const zh = lang === 'zh';
+const prefix = zh ? '/zh' : '';
+---
+<section id="car-audio" class="alt" aria-labelledby="car-audio-title">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">{zh ? '车载音乐 · 不止于蓝牙' : 'In-car audio · Beyond Bluetooth'}</p>
+      <h2 id="car-audio-title">{zh ? '为车载音乐增添 Wi-Fi 播放新选择' : 'More ways to enjoy your music'}</h2>
+      <p>{zh
+        ? '让兼容的 Android 车机通过 AirPlay 接收 iPhone 的音乐。无需更换车机，为熟悉的旅途增添一种无线播放方式。'
+        : 'Let a compatible Android car display receive music from your iPhone over AirPlay. Add a Wi-Fi listening option without replacing your head unit.'}</p>
+    </div>
+    <div class="ways">
+      <article class="card">
+        <h3>{zh ? '通过 Wi-Fi 传输音乐' : 'Music over Wi-Fi'}</h3>
+        <p>{zh
+          ? '不依赖常规 iPhone 蓝牙音频连接的 SBC／AAC 有损传输路径。CastBay 支持接收 ALAC 无损编码音频；实际采用的格式取决于发送端和播放场景，并不保证音质一定优于蓝牙。'
+          : 'An alternative to the SBC/AAC lossy audio path used by conventional iPhone Bluetooth connections. CastBay can receive ALAC lossless-encoded audio; the actual format depends on the sender and playback mode. Better sound than Bluetooth is not guaranteed.'}</p>
+      </article>
+      <article class="card">
+        <h3>{zh ? '让音乐拥有自己的屏幕' : 'Give your music a screen'}</h3>
+        <p>{zh
+          ? '在支持的场景下显示歌曲信息、专辑封面及可选歌词。可用信息取决于音乐应用、内容来源和 CastBay 版本，歌词并非所有歌曲都可用。'
+          : 'View track information, album artwork and optional lyrics where supported. Availability depends on the music app, content sources and CastBay version; lyrics are not available for every track.'}</p>
+      </article>
+    </div>
+    <aside class="audio-note" aria-label={zh ? '音质说明' : 'Audio quality note'}>
+      <strong>{zh ? '支持无损格式，不等于端到端无损。' : 'Lossless format support is not an end-to-end lossless guarantee.'}</strong>
+      <p>{zh
+        ? '即使接收到 ALAC，音频此前仍可能经过有损编码或重采样。实际音质取决于音源、AirPlay 传输格式、CastBay 版本、Android 音频处理与输出链路，以及车载音响系统。'
+        : 'Even an ALAC stream may contain audio that was previously lossily encoded or resampled. Sound quality depends on the source, AirPlay transport format, CastBay version, Android audio processing and output path, and the car’s sound system.'}</p>
+    </aside>
+    <div class="faq">
+      <details>
+        <summary>{zh ? '我的车机可以使用吗？' : 'Will it work with my car display?'}</summary>
+        <p>{zh
+          ? '需要支持安装第三方 APK 的兼容 Android 6.0 及以上车机。并非所有原厂车机都能安装，只有 Android Auto 或 CarPlay 功能也不代表可以运行 Android App。'
+          : 'You need a compatible Android 6.0 or later head unit that permits third-party APK installation. Not all factory systems do; Android Auto or CarPlay support alone does not mean a system can run Android apps.'}</p>
+        <p>{zh ? '安装前请查看' : 'Before installing, check the '}<a href={`${prefix}/compatibility`}>{zh ? '设备兼容性列表' : 'device compatibility list'}</a>{zh ? '。' : '.'}</p>
+      </details>
+      <details>
+        <summary>{zh ? '手机和车机如何连接？' : 'How do my phone and car display connect?'}</summary>
+        <p>{zh
+          ? '两者需要处于可互相发现和通信的同一 Wi-Fi 网络。热点方案是否可用取决于手机和车机，设备隔离可能阻止发现。音乐应用访问在线内容所需的互联网连接，也需要单独确认。'
+          : 'Both devices need a shared Wi-Fi network that allows discovery and communication. Hotspot compatibility varies by phone and head unit; client isolation can block discovery. Separately check internet access if your music app needs online content.'}</p>
+        <p>{zh ? '连接后，在 iPhone 的音频输出菜单中选择 CastBay。音乐播放无需开启屏幕镜像。' : 'Then choose CastBay in your iPhone’s audio output menu. Screen mirroring is not required for music playback.'}</p>
+      </details>
+      <details>
+        <summary>{zh ? '这可以替代 CarPlay 吗？' : 'Does this replace CarPlay?'}</summary>
+        <p>{zh
+          ? '不可以。CastBay 在这里提供的是音乐接收能力，不提供 CarPlay 的导航、通话或车载系统集成。它也适合没有原生 CarPlay、但能够安装 Android App 的兼容设备。'
+          : 'No. CastBay provides music reception, not CarPlay navigation, phone calls or vehicle-system integration. It is also an option for compatible devices that can install Android apps but lack native CarPlay.'}</p>
+      </details>
+    </div>
+    <p class="car-safety">{zh ? '请在停车时完成安装、配对和设置；驾驶时不要操作屏幕。' : 'Install, pair and configure while parked. Do not operate the screen while driving.'}</p>
+    <a class="btn btn-ghost" href={`${prefix}/guide`}>{zh ? '查看安装与连接指南' : 'Installation & connection guide'}</a>
+  </div>
+</section>
+
+<style>
+  #car-audio { scroll-margin-top: 100px; }
+  .audio-note {
+    margin: 28px 0;
+    padding: 20px 24px;
+    border-inline-start: 3px solid var(--accent);
+    border-radius: 0 12px 12px 0;
+    background: var(--card);
+    color: var(--text-2);
+  }
+  .audio-note strong { color: var(--text); }
+  .audio-note p { margin: 8px 0 0; }
+  .car-safety { margin: 24px 0; color: var(--text-2); font-size: 15px; }
+</style>

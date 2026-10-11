@@ -3,6 +3,7 @@ import Page from '../layouts/Page.astro';
 import { APK_URL, formatDate } from '../i18n';
 import { releases } from '../releases';
 import Screenshots from '../components/Screenshots.astro';
+import CarAudio from '../components/CarAudio.astro';
 
 // The newest release, shown under the download button.
 const [latest] = await releases('en');
@@ -24,6 +25,7 @@ const [latest] = await releases('en');
         </a>
         <a class="btn btn-ghost" href="https://github.com/weenas/castbay">View source
         </a>
+        <a class="btn btn-ghost" href="#car-audio">In-car music</a>
       </div>
       <p class="note">
         Version {latest.data.version} · {formatDate('en', latest.data.date)} · <a href="/changelog">What's new</a><br>
@@ -58,7 +60,7 @@ const [latest] = await releases('en');
         <article class="card">
           <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
           <h3>Music</h3>
-          <p>A blurred-cover backdrop, scrolling lyrics (optional) and round playback controls. AirPlay music plays in lossless ALAC, timed to the phone as on an Apple TV, so lyrics stay in sync.</p>
+          <p>A blurred-cover backdrop, optional scrolling lyrics and playback controls. Supports ALAC audio reception over AirPlay; the actual format and sound quality depend on the sender and audio output path. <a href="#car-audio">Explore in-car music and audio quality</a>.</p>
         </article>
         <article class="card">
           <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg></div>
@@ -84,7 +86,9 @@ const [latest] = await releases('en');
     </div>
   </section>
 
-  <section id="screens" class="alt">
+  <CarAudio lang="en" />
+
+  <section id="screens">
     <div class="wrap">
       <div class="section-head">
         <h2>See it on the TV</h2>
@@ -130,7 +134,7 @@ const [latest] = await releases('en');
           <ul>
             <li>From Control Center's Screen Mirroring, or an app's AirPlay icon</li>
             <li>Mirroring, music and video</li>
-            <li>Lossless music; previous and next from the TV</li>
+            <li>ALAC audio reception; previous and next from the TV</li>
           </ul>
         </div>
         <div class="card">
