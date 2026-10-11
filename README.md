@@ -162,7 +162,7 @@ Cloudflare builds and publishes the site from `web/` whenever `main` changes (`w
 
 ## Contributing
 
-Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Questions and ideas go to [Discussions](https://github.com/weenas/castbay/discussions); security issues are reported privately ([SECURITY.md](SECURITY.md)). Everyone is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Questions, ideas and device reports: start with the [community welcome discussion](https://github.com/weenas/castbay/discussions/205) or browse [all Discussions](https://github.com/weenas/castbay/discussions); security issues are reported privately ([SECURITY.md](SECURITY.md)). Everyone is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
