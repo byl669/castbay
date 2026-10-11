@@ -12,7 +12,7 @@
   "assets": {
     "directory": "./dist",
     "not_found_handling": "404-page",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/google4a41bd36656ece7a.html"]
   },
   "r2_buckets": [{ "binding": "REPORTS", "bucket_name": "castbay-reports" }],
   "d1_databases": [{ "binding": "STATS", "database_name": "castbay-stats", "database_id": "d2366198-eb53-4ad9-ae52-6bd388d84768" }],

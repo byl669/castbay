@@ -20,12 +20,23 @@
 // totals stay private even if the Access application were removed by mistake.
 
 const MAX_BYTES = 512 * 1024;
+
+// Google Search Console's ownership file. The static assets would answer its .html address with
+// a redirect to a clean one (as for every page), which the check doesn't follow; so the Worker
+// answers it as it is (wrangler.jsonc: run_worker_first).
+const GOOGLE_VERIFICATION_PATH = '/google4a41bd36656ece7a.html';
+const GOOGLE_VERIFICATION = 'google-site-verification: google4a41bd36656ece7a.html';
 // Crockford's base 32: no I, L, O or U, so an ID read off a TV is not misread.
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === GOOGLE_VERIFICATION_PATH && (request.method === 'GET' || request.method === 'HEAD')) {
+      return new Response(request.method === 'HEAD' ? null : GOOGLE_VERIFICATION, {
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=3600' },
+      });
+    }
     const routes = {
       '/api/reports': receiveReport,
       '/api/stats': receiveStats,
