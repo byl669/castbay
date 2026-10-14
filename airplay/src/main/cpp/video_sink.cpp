@@ -2,6 +2,7 @@
 
 #include "file_log.h"
 #include <mutex>
+#include <pthread.h>
 
 #define LOGE(...) castbay_logf(ANDROID_LOG_ERROR, "CastBayVideoSink", __VA_ARGS__)
 
@@ -12,20 +13,30 @@ jmethodID g_on_video = nullptr;
 jmethodID g_on_end = nullptr;
 std::mutex g_mutex;
 
-JNIEnv *currentEnv() {
-    if (!g_vm) return nullptr;
+pthread_key_t g_detach_key;
+pthread_once_t g_detach_key_once = PTHREAD_ONCE_INIT;
+
+// The key's destructor runs as an attached thread ends.
+void detachOnExit(void *) {
     JNIEnv *env = nullptr;
-    if (g_vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_OK) {
-        return env;
-    }
-    if (g_vm->AttachCurrentThread(&env, nullptr) == JNI_OK) return env;
-    return nullptr;
+    if (g_vm && g_vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_OK) g_vm->DetachCurrentThread();
 }
 }
 
 namespace castbay {
 void initJvm(JavaVM *vm) { g_vm = vm; }
 JavaVM *jvm() { return g_vm; }
+
+JNIEnv *currentEnv() {
+    if (!g_vm) return nullptr;
+    JNIEnv *env = nullptr;
+    if (g_vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_OK) return env;
+    if (g_vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return nullptr;
+    pthread_once(&g_detach_key_once, [] { pthread_key_create(&g_detach_key, detachOnExit); });
+    // Any non-null value, so that the destructor runs.
+    pthread_setspecific(g_detach_key, g_vm);
+    return env;
+}
 
 void setVideoSink(JNIEnv *env, jobject sink) {
     std::lock_guard<std::mutex> lock(g_mutex);

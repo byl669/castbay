@@ -16,15 +16,6 @@ jmethodID g_on_metadata = nullptr;
 jmethodID g_on_cover_art = nullptr;
 jmethodID g_on_progress = nullptr;
 std::mutex g_mutex;
-
-JNIEnv *currentEnv() {
-    JavaVM *vm = castbay::jvm();
-    if (!vm) return nullptr;
-    JNIEnv *env = nullptr;
-    if (vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_OK) return env;
-    if (vm->AttachCurrentThread(&env, nullptr) == JNI_OK) return env;
-    return nullptr;
-}
 }
 
 namespace castbay {
