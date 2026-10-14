@@ -1,0 +1,45 @@
+# OpenSSL is a submodule pinned to a release of the 3.5 LTS line, which Dependabot can't follow
+# (its submodule updates go to a branch's latest commit, not to releases). Every week this
+# looks for a newer 3.5.x release and opens an issue for it, once.
+name: OpenSSL release check
+
+on:
+  schedule:
+    - cron: "41 2 * * 2"
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      UPSTREAM: https://github.com/openssl/openssl.git
+    steps:
+      - name: Compare the pinned commit with the latest 3.5.x release
+        run: |
+          latest=$(git ls-remote --tags --refs "$UPSTREAM" 'openssl-3.5.*' | sed 's#.*refs/tags/##' | sort -V | tail -n 1)
+          # An annotated tag's commit is listed as <tag>^{}.
+          release=$(git ls-remote "$UPSTREAM" "refs/tags/$latest^{}" "refs/tags/$latest" | sort -k2 -r | head -n 1 | cut -f1)
+          pinned=$(gh api "repos/$GH_REPO/contents/third_party/openssl" --jq .sha)
+          echo "Latest release $latest ($release); pinned $pinned"
+          if [ "$release" = "$pinned" ]; then exit 0; fi
+          title="Update OpenSSL to $latest"
+          if [ "$(gh issue list --state all --search "\"$title\" in:title" --json number --jq length)" != 0 ]; then
+            echo "Already reported"; exit 0
+          fi
+          gh issue create --title "$title" --body "OpenSSL [$latest](https://github.com/openssl/openssl/releases/tag/$latest) is out; \`third_party/openssl\` is pinned to \`$pinned\`.
+
+          Check the [release notes](https://openssl-library.org/news/vulnerabilities/) for security fixes, then:
+
+          \`\`\`bash
+          git -C third_party/openssl fetch --depth 1 origin tag $latest
+          git -C third_party/openssl checkout $latest
+          git add third_party/openssl
+          \`\`\`
+
+          The next build recompiles libcrypto (tools/build-openssl.sh). Opened by the OpenSSL release check workflow."
