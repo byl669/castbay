@@ -1,0 +1,4 @@
+• Casting verification now covers apps' cast button (DLNA): the TV asks the first time a phone casts from an app.
+• Blocked or not-yet-allowed devices can't control DLNA playback.
+• "When another device casts" applies across AirPlay and DLNA both ways.
+• Fixed a possible crash on Android 6 when mirroring or music ended.
