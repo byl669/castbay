@@ -1,5 +1,7 @@
 package com.weenas.castbay.dlna
 
+import com.weenas.castbay.R
+
 /**
  * Which app is casting over DLNA. DLNA doesn't say which phone is casting, but apps' requests
  * name the app in their User-Agent (iQiyi: "UPnP/1.0 IQIYIDLNA/iqiyidlna/NewDLNA/1.0").
@@ -14,6 +16,20 @@ object DlnaSender {
     const val MANGO_TV = "mango_tv"
     const val KUGOU = "kugou"
     const val KUWO = "kuwo"
+
+    /** The app's name (a string resource), or null for an unknown [id]. */
+    fun nameRes(id: String): Int? = when (id) {
+        IQIYI -> R.string.sender_iqiyi
+        BILIBILI -> R.string.sender_bilibili
+        NETEASE_MUSIC -> R.string.sender_netease_music
+        QQ_MUSIC -> R.string.sender_qq_music
+        TENCENT_VIDEO -> R.string.sender_tencent_video
+        YOUKU -> R.string.sender_youku
+        MANGO_TV -> R.string.sender_mango_tv
+        KUGOU -> R.string.sender_kugou
+        KUWO -> R.string.sender_kuwo
+        else -> null
+    }
 
     /** User-Agent fragments (lowercase) to the app; first match wins. */
     private val PATTERNS = listOf(

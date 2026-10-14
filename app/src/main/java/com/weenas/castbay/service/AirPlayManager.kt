@@ -202,11 +202,42 @@ class AirPlayManager private constructor(private val context: Context) {
         @Volatile private var volume = 100
         @Volatile private var muted = false
 
-        override fun open(url: String, media: com.weenas.castbay.dlna.DlnaMedia) {
-            if (!activeSettings.allowTakeover && airPlayBusy()) {
-                Log.i(TAG, "DLNA video refused: another device is casting over AirPlay")
-                throw com.weenas.castbay.dlna.Soap.Fault(701, "Another device is casting to this TV")
+        /** Casting verification, blocked devices and the second-device rule, as for AirPlay ([admitSender]). */
+        override fun authorize(address: String, sender: String, opening: Boolean) {
+            val deviceId = AccessPolicy.dlnaDeviceId(address)
+            val onScreen = when {
+                airPlayBusy() -> airPlaySenderId.ifEmpty { "airplay" }
+                dlnaCasting() -> dlnaSenderId
+                else -> null
             }
+            val decision = AccessPolicy.decide(
+                activeSettings, deviceId, knownDevices.find(deviceId), onScreen, AccessPolicy.dlnaNeedsApproval(activeSettings)
+            )
+            val label = Log.personal(deviceId.removePrefix("dlna:"))
+            val refusal = when (decision) {
+                AccessPolicy.Decision.BLOCKED -> "This device is blocked on the TV"
+                AccessPolicy.Decision.BUSY -> "Another device is casting to this TV"
+                AccessPolicy.Decision.ASK -> {
+                    // Only a new cast asks; playback controls from a device not yet allowed are refused.
+                    if (opening) {
+                        Log.i(TAG, "New DLNA sender needs approval: $sender at $label")
+                        _deviceRequest.value = DeviceRequest(deviceId, dlnaDeviceName(sender, address), "DLNA")
+                    }
+                    "Allow this device on the TV, then cast again"
+                }
+                AccessPolicy.Decision.ADMIT -> null
+            }
+            if (refusal != null) {
+                Log.i(TAG, "DLNA ${if (opening) "cast" else "control"} from $sender at $label refused: $refusal")
+                throw com.weenas.castbay.dlna.Soap.Fault(701, refusal)
+            }
+            if (!opening) return
+            knownDevices.put(KnownDevice(deviceId, dlnaDeviceName(sender, address), "DLNA", allowed = true))
+            if (_deviceRequest.value?.deviceId == deviceId) _deviceRequest.value = null
+            dlnaSenderId = deviceId
+        }
+
+        override fun open(url: String, media: com.weenas.castbay.dlna.DlnaMedia) {
             this.url = url
             this.media = media
             start(url, media)
@@ -706,18 +737,27 @@ class AirPlayManager private constructor(private val context: Context) {
      * Must answer at once (the protocol's only thread is waiting).
      */
     private fun admitSender(deviceId: String, name: String, model: String): Boolean {
-        val known = knownDevices.find(deviceId)
         val label = name.trim().ifEmpty { model }
-        when {
-            known?.allowed == false -> {
+        // A second AirPlay sender is refused (or let take over) by UxPlay; one while DLNA plays, here.
+        val decision = AccessPolicy.decide(
+            activeSettings, deviceId, knownDevices.find(deviceId), dlnaSenderId.takeIf { dlnaCasting() },
+            AccessPolicy.airPlayNeedsApproval(activeSettings)
+        )
+        when (decision) {
+            AccessPolicy.Decision.BLOCKED -> {
                 Log.i(TAG, "Refused blocked AirPlay sender: ${Log.personal(label)} ($model)")
                 return false
             }
-            known == null && activeSettings.access == ReceiverSettings.ACCESS_CONFIRM -> {
+            AccessPolicy.Decision.BUSY -> {
+                Log.i(TAG, "Refused AirPlay sender ${Log.personal(label)} ($model): another device is casting over DLNA")
+                return false
+            }
+            AccessPolicy.Decision.ASK -> {
                 Log.i(TAG, "New AirPlay sender needs approval: ${Log.personal(label)} ($model)")
                 _deviceRequest.value = DeviceRequest(deviceId, label, model)
                 return false
             }
+            AccessPolicy.Decision.ADMIT -> {}
         }
         Log.i(TAG, "AirPlay sender: ${Log.personal(label)} ($model)")
         knownDevices.put(KnownDevice(deviceId, label, model, allowed = true))
@@ -733,6 +773,19 @@ class AirPlayManager private constructor(private val context: Context) {
 
     private val knownDevices = KnownDevices(context)
 
+    /** The DLNA sender last admitted ([AccessPolicy.dlnaDeviceId]); casting while [dlnaCasting]. */
+    @Volatile private var dlnaSenderId = ""
+
+    /** DLNA video or music is playing (until it stops or AirPlay replaces it). */
+    private fun dlnaCasting() = currentState == AirPlayConnectionState.Streaming && currentStreamInfo.isDlna
+
+    /** How a DLNA sender is listed: its app ([com.weenas.castbay.dlna.DlnaSender]) and network address (it has no device name). */
+    private fun dlnaDeviceName(app: String, address: String): String {
+        val host = address.removePrefix("::ffff:")
+        val name = com.weenas.castbay.dlna.DlnaSender.nameRes(app)?.let(context::getString)
+        return if (name == null) host else "$name · $host"
+    }
+
     /** A new device asking to cast, while new devices need approval; [allowed] once it is. */
     data class DeviceRequest(val deviceId: String, val name: String, val model: String, val allowed: Boolean = false)
     private val _deviceRequest = kotlinx.coroutines.flow.MutableStateFlow<DeviceRequest?>(null)
@@ -742,7 +795,7 @@ class AirPlayManager private constructor(private val context: Context) {
     fun answerDeviceRequest(allow: Boolean) {
         val request = _deviceRequest.value ?: return
         knownDevices.put(KnownDevice(request.deviceId, request.name, request.model, allowed = allow))
-        Log.i(TAG, "${if (allow) "Allowed" else "Blocked"} AirPlay sender ${Log.personal(request.name)}")
+        Log.i(TAG, "${if (allow) "Allowed" else "Blocked"} ${request.model.takeIf { it == "DLNA" } ?: "AirPlay"} sender ${Log.personal(request.name)}")
         _deviceRequest.value = if (allow) request.copy(allowed = true) else null
     }
 

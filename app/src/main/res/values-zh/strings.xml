@@ -313,5 +313,5 @@
     <string name="access_confirm">电视确认</string>
     <string name="setting_confirm_note">设备第一次投屏时，需要在电视上允许，然后在设备上重新投屏。</string>
     <string name="help_access_title">谁可以投屏</string>
-    <string name="help_access">在设置 → 连接 → 投屏验证中选择：\n• 电视确认：新设备第一次投屏时，电视上会询问是否允许，允许后在设备上重新投屏。\n• PIN 码：新设备第一次投屏时，在设备上输入电视显示的 4 位 PIN 码。\n• 密码：每台设备都要输入设置中的密码。\n在“投屏过的设备”里，可以拒绝某台设备，或全部移除。</string>
+    <string name="help_access">在设置 → 连接 → 投屏验证中选择：\n• 电视确认：新设备第一次投屏时，电视上会询问是否允许，允许后在设备上重新投屏。\n• PIN 码：新设备第一次投屏时，在设备上输入电视显示的 4 位 PIN 码。\n• 密码：每台设备都要输入设置中的密码。\n应用自带的投屏按钮（DLNA）无法输入 PIN 码或密码：选了以上任何一种，手机第一次从应用投屏时，电视上都会询问是否允许。\n在“投屏过的设备”里，可以拒绝某台设备，或全部移除。</string>
 </resources>

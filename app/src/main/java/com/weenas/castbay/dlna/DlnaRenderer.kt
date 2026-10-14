@@ -9,9 +9,12 @@ class DlnaRenderer(private val target: Target) {
     /** What the renderer drives; implemented by the app's player. */
     interface Target {
         /**
-         * A new media URL from SetAVTransportURI. May throw [Soap.Fault] to refuse it, e.g.
-         * while another device is casting.
+         * Before an action that changes what plays (casting, playback, volume) from the device
+         * at [address] ([sender] is its app): throws [Soap.Fault] to refuse it, e.g. for a
+         * blocked device, or another while one is casting. [opening] for SetAVTransportURI.
          */
+        fun authorize(address: String, sender: String, opening: Boolean) {}
+        /** A new media URL from SetAVTransportURI, once [authorize]d. */
         fun open(url: String, media: DlnaMedia)
         fun play()
         fun pause()
@@ -36,13 +39,25 @@ class DlnaRenderer(private val target: Target) {
 
     /**
      * The out arguments of [action] on [service], in SCPD order; throws [Soap.Fault]. [sender]
-     * is the requesting app ([DlnaSender]), kept with the media it casts.
+     * is the requesting app ([DlnaSender]), kept with the media it casts; [address] the device
+     * it runs on, which the [Target] authorizes for actions that change what plays.
      */
     @Synchronized
-    fun handle(service: UpnpDescriptions.Service, action: Soap.Action, sender: String = ""): List<Pair<String, String>> = when (service) {
-        UpnpDescriptions.AV_TRANSPORT -> avTransport(action, sender)
-        UpnpDescriptions.RENDERING_CONTROL -> renderingControl(action)
-        else -> connectionManager(action)
+    fun handle(
+        service: UpnpDescriptions.Service,
+        action: Soap.Action,
+        sender: String = "",
+        address: String = ""
+    ): List<Pair<String, String>> {
+        if (action.name in CHANGING_ACTIONS) {
+            val app = sender.ifEmpty { DlnaSender.fromUrl(action.args["CurrentURI"]) }
+            target.authorize(address, app, opening = action.name == "SetAVTransportURI")
+        }
+        return when (service) {
+            UpnpDescriptions.AV_TRANSPORT -> avTransport(action, sender)
+            UpnpDescriptions.RENDERING_CONTROL -> renderingControl(action)
+            else -> connectionManager(action)
+        }
     }
 
     /**
@@ -175,5 +190,13 @@ class DlnaRenderer(private val target: Target) {
             "PeerConnectionID" to "-1", "Direction" to "Input", "Status" to "OK"
         )
         else -> throw Soap.Fault(401, "Invalid Action")
+    }
+
+    private companion object {
+        /** Actions that change what plays; queries (GetPositionInfo, …) are answered to anyone. */
+        val CHANGING_ACTIONS = setOf(
+            "SetAVTransportURI", "SetNextAVTransportURI", "Play", "Pause", "Stop", "Seek", "Next", "Previous",
+            "SetVolume", "SetMute", "SelectPreset"
+        )
     }
 }

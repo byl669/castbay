@@ -311,5 +311,5 @@
     <string name="access_confirm">Confirm</string>
     <string name="setting_confirm_note">The first time a device casts, it must be allowed on the TV, then cast again.</string>
     <string name="help_access_title">Who can cast</string>
-    <string name="help_access">Choose in Settings → Connection → Casting verification:\n• Confirm: the first time a device casts, the TV asks whether to allow it; once allowed, cast again from the device.\n• PIN: the first time a device casts, enter the 4-digit PIN the TV shows.\n• Password: every device enters the password set in Settings.\nUnder “Devices that have cast”, you can block a device, or remove them all.</string>
+    <string name="help_access">Choose in Settings → Connection → Casting verification:\n• Confirm: the first time a device casts, the TV asks whether to allow it; once allowed, cast again from the device.\n• PIN: the first time a device casts, enter the 4-digit PIN the TV shows.\n• Password: every device enters the password set in Settings.\nApps’ cast button (DLNA) can’t enter a PIN or password: with any of these, the TV asks the first time a phone casts from an app.\nUnder “Devices that have cast”, you can block a device, or remove them all.</string>
 </resources>

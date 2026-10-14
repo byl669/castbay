@@ -106,6 +106,8 @@ If casting verification is on in Settings, a new device casting for the first ti
 - **PIN**: enters the four-digit PIN the TV shows in the box that appears on the phone, once; the device is remembered after that. OK or Back puts the PIN away, and the device gets a new one when it tries again.
 - **Password**: enters the password from Settings. The phone remembers it until the password changes.
 
+Apps' own cast button (DLNA) has no way to enter a PIN or password, so with any of the three, a phone casting from an app for the first time is confirmed on the TV as above. DLNA doesn't say which phone is casting, so the TV knows it by its address on the network, listed as the app and that address (e.g. "Bilibili · 192.168.1.23").
+
 ## While playing: remote and touch screen
 
 - **Video cast from an app**: OK or Play pauses and resumes; Left and Right skip back and ahead 10 seconds. On a touch screen, tap it and pause or skip in the menu.
@@ -154,7 +156,7 @@ Changing these restarts the receiver; a device that was casting connects again.
 - **Add the TV's name after it**: adds the TV's model or name after it, so several TVs are told apart. The full name phones see is shown below.
 - **DLNA casting (apps' cast button)**: whether apps' own cast buttons can cast here.
 - **Casting verification**: Not required, Confirm, PIN or Password; see "The first time a device connects" above. Password needs at least 4 digits.
-- **When another device casts**: while one device is casting, another is refused, or takes over (the current cast ends).
+- **When another device casts**: while one device is casting, another is refused, or takes over (the current cast ends). This holds across AirPlay and DLNA alike.
 - **Devices that have cast**: each can be allowed or blocked; blocked devices can't cast. Remove all (press twice) makes every device new again.
 
 ### Screen mirroring

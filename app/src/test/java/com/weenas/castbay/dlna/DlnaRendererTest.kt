@@ -10,6 +10,11 @@ class DlnaRendererTest {
     private class FakeTarget : DlnaRenderer.Target {
         val calls = mutableListOf<String>()
         var status = DlnaRenderer.Status(DlnaState.STOPPED)
+        var refuse: String? = null
+        override fun authorize(address: String, sender: String, opening: Boolean) {
+            calls += "authorize $address $sender $opening"
+            refuse?.let { throw Soap.Fault(701, it) }
+        }
         override fun open(url: String, media: DlnaMedia) { calls += "open $url ${media.title}" }
         override fun play() { calls += "play" }
         override fun pause() { calls += "pause" }
@@ -57,7 +62,7 @@ class DlnaRendererTest {
         call("Seek", "<Unit>REL_TIME</Unit><Target>00:01:30</Target>")
         call("Pause")
         call("SetVolume", "<Channel>Master</Channel><DesiredVolume>35</DesiredVolume>", UpnpDescriptions.RENDERING_CONTROL)
-        assertEquals(listOf("open http://cdn/v.mp4 null", "play", "seek 90.0", "pause", "volume 35"), target.calls)
+        assertEquals(listOf("open http://cdn/v.mp4 null", "play", "seek 90.0", "pause", "volume 35"), target.calls.filterNot { it.startsWith("authorize") })
 
         target.status = DlnaRenderer.Status(DlnaState.PAUSED, positionSec = 3725.4, durationSec = 5400.0)
         assertEquals(DlnaState.PAUSED, call("GetTransportInfo")["CurrentTransportState"])
@@ -117,5 +122,37 @@ class DlnaRendererTest {
         assertEquals(42.0, DlnaState.parseTime("42")!!, 0.001)
         assertNull(DlnaState.parseTime("NOT_IMPLEMENTED"))
         assertEquals("0:00:00", DlnaState.formatTime(-3.0))
+    }
+
+    @Test
+    fun theTargetAuthorizesWhatChangesPlaybackNotQueries() {
+        val uri = "<CurrentURI>http://cdn/v.mp4</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>"
+        renderer.handle(UpnpDescriptions.AV_TRANSPORT, Soap.parse(soap("SetAVTransportURI", uri), null)!!, "Bilibili", "10.0.0.7")
+        renderer.handle(UpnpDescriptions.AV_TRANSPORT, Soap.parse(soap("Pause"), null)!!, "Bilibili", "10.0.0.7")
+        renderer.handle(UpnpDescriptions.AV_TRANSPORT, Soap.parse(soap("GetPositionInfo"), null)!!, "Bilibili", "10.0.0.8")
+        assertEquals(
+            listOf("authorize 10.0.0.7 Bilibili true", "open http://cdn/v.mp4 null", "authorize 10.0.0.7 Bilibili false", "pause"),
+            target.calls
+        )
+    }
+
+    @Test
+    fun aRefusedDeviceCastsNothing() {
+        target.refuse = "Another device is casting to this TV"
+        try {
+            call("SetAVTransportURI", "<CurrentURI>http://cdn/v.mp4</CurrentURI>")
+            fail("expected a fault")
+        } catch (fault: Soap.Fault) {
+            assertEquals(701, fault.code)
+        }
+        assertTrue(target.calls.none { it.startsWith("open") })
+        // Its URI isn't taken either: Play has nothing to start.
+        target.refuse = null
+        try {
+            call("Play", "<Speed>1</Speed>")
+            fail("expected a fault")
+        } catch (fault: Soap.Fault) {
+            assertEquals(701, fault.code)
+        }
     }
 }

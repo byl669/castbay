@@ -93,7 +93,7 @@ Connection and screen-mirroring settings (the device name, casting verification,
 
 ### Can I stop other people from casting to my TV?
 
-Yes. In Settings → Connection → Casting verification, choose Confirm (the TV asks before a new device casts), PIN (a new device enters a PIN shown on the TV, once) or Password. Any device that has cast can be blocked there too.
+Yes. In Settings → Connection → Casting verification, choose Confirm (the TV asks before a new device casts), PIN (a new device enters a PIN shown on the TV, once) or Password. Any device that has cast can be blocked there too. Casting from apps' own cast button (DLNA) is confirmed on the TV under any of the three.
 
 ### Does CastBay collect my data?
 

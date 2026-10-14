@@ -117,7 +117,7 @@ class DlnaHttpServer(
             Log.i(TAG, "$from ($userAgent) → ${service.name}.${action.name} ${action.args.filterKeys { it != "InstanceID" }.mapValues { (key, value) -> if (key in PERSONAL_ARGS) Log.personal(value) else value }}")
         }
         return try {
-            val out = renderer.handle(service, action, DlnaSender.fromUserAgent(userAgent))
+            val out = renderer.handle(service, action, DlnaSender.fromUserAgent(userAgent), from)
             Response(200, "OK", Soap.response(service.type, action.name, out))
         } catch (fault: Soap.Fault) {
             Log.i(TAG, "${service.name}.${action.name} refused: ${fault.code} ${fault.description}")

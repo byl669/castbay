@@ -74,18 +74,7 @@ fun CastingBadge(stream: StreamInfo, maxWidth: Dp, modifier: Modifier = Modifier
 
 /** The casting app's name, in the TV's language, from its [DlnaSender] id; "" if unknown. */
 @Composable
-private fun dlnaSenderLabel(id: String): String = when (id) {
-    DlnaSender.IQIYI -> stringResource(R.string.sender_iqiyi)
-    DlnaSender.BILIBILI -> stringResource(R.string.sender_bilibili)
-    DlnaSender.NETEASE_MUSIC -> stringResource(R.string.sender_netease_music)
-    DlnaSender.QQ_MUSIC -> stringResource(R.string.sender_qq_music)
-    DlnaSender.TENCENT_VIDEO -> stringResource(R.string.sender_tencent_video)
-    DlnaSender.YOUKU -> stringResource(R.string.sender_youku)
-    DlnaSender.MANGO_TV -> stringResource(R.string.sender_mango_tv)
-    DlnaSender.KUGOU -> stringResource(R.string.sender_kugou)
-    DlnaSender.KUWO -> stringResource(R.string.sender_kuwo)
-    else -> ""
-}
+private fun dlnaSenderLabel(id: String): String = DlnaSender.nameRes(id)?.let { stringResource(it) }.orEmpty()
 
 private val CONNECTED_GREEN = Color(0xFF34C759)
 /** Translucent white, like the music screen's other secondary text. */
