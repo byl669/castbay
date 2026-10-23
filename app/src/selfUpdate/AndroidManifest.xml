@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Installing an update the person chose to download (About's Update button). Merged only into
+    builds with the in-app updater: store builds (-Pcastbay.selfUpdate=false) don't ask for it.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+</manifest>

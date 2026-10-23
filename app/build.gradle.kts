@@ -18,6 +18,15 @@ val gitCommit = providers.exec {
     isIgnoreExitValue = true
 }.standardOutput.asText.map { it.trim().ifEmpty { "local" } }
 
+// Installing a downloaded update needs REQUEST_INSTALL_PACKAGES, declared in its own manifest so
+// that store builds (-Pcastbay.selfUpdate=false) leave the permission out altogether.
+val selfUpdate = (project.findProperty("castbay.selfUpdate") as String?)?.toBoolean() ?: true
+androidComponents {
+    onVariants { variant ->
+        if (selfUpdate) variant.sources.manifests.addStaticManifestFile("src/selfUpdate/AndroidManifest.xml")
+    }
+}
+
 android {
     namespace = "com.weenas.castbay"
     compileSdk = 37
@@ -49,11 +58,8 @@ android {
         resValue("string", "relay_url", if (serverUrl == null) "https://cast.weenas.com" else "")
         // The in-app updater and the daily update check. Store builds (F-Droid) turn both off
         // with -Pcastbay.selfUpdate=false: the store updates the app, and doesn't allow it to.
-        val selfUpdate = (project.findProperty("castbay.selfUpdate") as String?)?.toBoolean() ?: true
         buildConfigField("boolean", "SELF_UPDATE", selfUpdate.toString())
         manifestPlaceholders["selfUpdate"] = selfUpdate.toString()
-        manifestPlaceholders["installPermission"] =
-            if (selfUpdate) "android.permission.REQUEST_INSTALL_PACKAGES" else "com.weenas.castbay.permission.NO_INSTALL"
 
         if (enableNativeBuild.get()) {
             externalNativeBuild {
