@@ -10,15 +10,18 @@ object DlnaState {
     val TRANSPORT_STATES = listOf(STOPPED, PLAYING, PAUSED, TRANSITIONING, NO_MEDIA)
 
     /**
-     * Media types we can play: anything ExoPlayer handles, as control points check before
-     * casting. No pictures: CastBay doesn't show them, so photo apps shouldn't offer it.
+     * Media types we can play on Android [sdkInt]: what ExoPlayer handles, as control points
+     * check before casting. No pictures: CastBay doesn't show them, so photo apps shouldn't
+     * offer it. FLAC only from Android 8.1, the first with a FLAC decoder.
      */
-    val SINK_PROTOCOL_INFO = listOf(
+    fun sinkProtocolInfo(sdkInt: Int): String = (listOf(
         "video/mp4", "video/x-flv", "video/flv", "video/mpeg", "video/x-matroska", "video/webm",
         "video/quicktime", "video/MP2T", "application/vnd.apple.mpegurl", "application/x-mpegURL",
-        "application/dash+xml", "audio/mpeg", "audio/mp4", "audio/aac", "audio/flac", "audio/x-flac",
-        "audio/wav", "audio/ogg"
-    ).joinToString(",") { "http-get:*:$it:*" }
+        "application/dash+xml", "audio/mpeg", "audio/mp4", "audio/aac", "audio/wav", "audio/ogg"
+    ) + if (sdkInt >= FLAC_DECODER_SDK) listOf("audio/flac", "audio/x-flac") else emptyList())
+        .joinToString(",") { "http-get:*:$it:*" }
+
+    private const val FLAC_DECODER_SDK = 27
 
     /** UPnP durations are H+:MM:SS (fractions allowed on input). */
     fun formatTime(seconds: Double): String {

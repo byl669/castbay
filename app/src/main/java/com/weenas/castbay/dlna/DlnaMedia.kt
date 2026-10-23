@@ -14,6 +14,8 @@ data class DlnaMedia(
     val isAudio: Boolean = false,
     /** A picture (a photo), which CastBay doesn't show. */
     val isImage: Boolean = false,
+    /** The resource's MIME type from its protocolInfo, if the sender gave one. */
+    val mimeType: String? = null,
     /** The casting app, from [DlnaSender.fromUserAgent]; empty when unknown. */
     val sender: String = ""
 ) {
@@ -48,6 +50,7 @@ data class DlnaMedia(
                 album = tag(didl, "upnp:album"),
                 albumArtUrl = tag(didl, "upnp:albumArtURI")?.takeIf { it.startsWith("http") },
                 isImage = isImage,
+                mimeType = mime.ifEmpty { null },
                 isAudio = isAudio
             )
         }

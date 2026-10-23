@@ -251,7 +251,7 @@ class AirPlayManager private constructor(private val context: Context) {
             videoRenderer.stop()
             audioRenderer.stop()
             applyVolume()
-            hlsPlayer.play(url, 0f) {
+            hlsPlayer.play(url, 0f, media.mimeType) {
                 currentError = null
                 if (media.isAudio) {
                     // Music apps' casts get the music screen: cover, title, lyrics, controls.

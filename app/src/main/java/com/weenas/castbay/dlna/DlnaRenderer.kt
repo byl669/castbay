@@ -186,7 +186,7 @@ class DlnaRenderer(private val target: Target) {
     }
 
     private fun connectionManager(action: Soap.Action): List<Pair<String, String>> = when (action.name) {
-        "GetProtocolInfo" -> listOf("Source" to "", "Sink" to DlnaState.SINK_PROTOCOL_INFO)
+        "GetProtocolInfo" -> listOf("Source" to "", "Sink" to DlnaState.sinkProtocolInfo(android.os.Build.VERSION.SDK_INT))
         "GetCurrentConnectionIDs" -> listOf("ConnectionIDs" to "0")
         "GetCurrentConnectionInfo" -> listOf(
             "RcsID" to "0", "AVTransportID" to "0", "ProtocolInfo" to "", "PeerConnectionManager" to "",

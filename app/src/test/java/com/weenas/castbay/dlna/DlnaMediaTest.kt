@@ -70,4 +70,10 @@ class DlnaMediaTest {
         // The MIME type wins over a misleading extension.
         assertFalse(DlnaMedia.parse("""<res protocolInfo="http-get:*:video/mp4:*">x</res>""", "http://cdn/cover.jpg").isImage)
     }
+
+    @Test
+    fun keepsTheSendersMimeType() {
+        assertEquals("application/x-mpegURL", DlnaMedia.parse("""<res protocolInfo="http-get:*:application/x-mpegURL:*">x</res>""", "http://cdn/play?id=1").mimeType)
+        assertNull(DlnaMedia.parse(null, "http://cdn/v.mp4").mimeType)
+    }
 }

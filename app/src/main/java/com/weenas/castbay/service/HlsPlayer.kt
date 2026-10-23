@@ -6,6 +6,7 @@ import android.os.Looper
 import com.weenas.castbay.util.Log
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Format
@@ -148,14 +149,17 @@ class HlsPlayer(
         }
     }
 
-    /** [onStarted] runs on the main thread once [player] exists, so the UI can attach it. */
-    fun play(url: String, startPositionSec: Float, onStarted: () -> Unit) {
+    /**
+     * [onStarted] runs on the main thread once [player] exists, so the UI can attach it.
+     * [mimeType] is the sender's, where it says (DLNA): it tells HLS and DASH links apart.
+     */
+    fun play(url: String, startPositionSec: Float, mimeType: String? = null, onStarted: () -> Unit) {
         // Mark active right away: the sender polls playback info while the post is pending.
         snapshot = Snapshot(positionSec = startPositionSec.toDouble(), state = AirPlayNative.PLAYBACK_ACTIVE)
-        main.post { startOnMain(url, startPositionSec, onStarted) }
+        main.post { startOnMain(url, startPositionSec, mimeType, onStarted) }
     }
 
-    private fun startOnMain(url: String, startPositionSec: Float, onStarted: () -> Unit) {
+    private fun startOnMain(url: String, startPositionSec: Float, mimeType: String?, onStarted: () -> Unit) {
         Log.i(TAG, "Playing ${Log.personal(url)} from ${startPositionSec}s")
         // A stop() queued just before this play() has reset the snapshot.
         snapshot = Snapshot(positionSec = startPositionSec.toDouble(), state = AirPlayNative.PLAYBACK_ACTIVE)
@@ -172,9 +176,21 @@ class HlsPlayer(
             player = it
         }
         // Usually the core's local .m3u8 (HLS), but senders may also pass a plain http(s)
-        // media URL, so let ExoPlayer infer the format from the URL.
-        exo.setMediaItem(MediaItem.fromUri(url), (startPositionSec * 1000).toLong().coerceAtLeast(0))
-        exo.prepare()
+        // media URL, so let ExoPlayer infer the format from the URL, or from the sender's MIME
+        // type where it gives one: a DLNA app's HLS or DASH link may have no .m3u8 or .mpd.
+        val item = MediaItem.Builder().setUri(url).setMimeType(adaptiveMimeType(mimeType)).build()
+        try {
+            exo.setMediaItem(item, (startPositionSec * 1000).toLong().coerceAtLeast(0))
+            exo.prepare()
+        } catch (error: RuntimeException) {
+            // E.g. a format no media source handles (IllegalStateException): it fails like a
+            // playback error, telling the sender, rather than crashing the app.
+            Log.e(TAG, "Couldn't start playback", error)
+            com.weenas.castbay.util.UsageStats.failure("video")
+            onStarted()
+            finish(appContext.getString(R.string.error_video_format))
+            return
+        }
         exo.playWhenReady = true
         main.removeCallbacks(progressUpdater)
         main.post(progressUpdater)
@@ -336,4 +352,11 @@ class HlsPlayer(
         const val QUALITY_INCREASE_AFTER_MS = 5_000
         const val PROGRESS_INTERVAL_MS = 250L
     }
+}
+
+/** Media3's MIME type for an HLS or DASH [mimeType] (any case); null otherwise, to infer the format from the URL. */
+internal fun adaptiveMimeType(mimeType: String?): String? = when (mimeType?.trim()?.lowercase()) {
+    "application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl" -> MimeTypes.APPLICATION_M3U8
+    "application/dash+xml" -> MimeTypes.APPLICATION_MPD
+    else -> null
 }
