@@ -1,0 +1,3 @@
+• Fixed a crash at every boot on Android 15 and later; the receiver starts with the device again.
+• Photo apps no longer offer CastBay for pictures over DLNA, which it doesn't show.
+• No placeholder install permission in the F-Droid build.
