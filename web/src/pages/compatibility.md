@@ -56,7 +56,22 @@ CastBay needs an Android device on Android 6.0 or later. Other brands of TVs, TV
 | QQ Music | DLNA | ❔ Not yet confirmed |
 | Any app | Screen mirroring | ✅ Whatever is on the phone's screen |
 
+## Media formats (DLNA)
+
+Apps' own cast button (DLNA) sends the TV a link, and the TV plays it. CastBay tells the app which formats it takes, so an app usually offers it only for those:
+
+| Type | Formats | Status |
+| --- | --- | --- |
+| Video files | MP4, MOV, MKV, WebM, FLV, MPEG-TS, MPEG-PS | ✅ Plays; the codec inside must be one the TV decodes (H.264 everywhere; H.265, VP9 or AV1 only with the TV's hardware decoder) |
+| Streaming video | HLS (.m3u8), DASH (.mpd) | ✅ Plays, adapting to the network; a link without .m3u8 or .mpd plays if the app says which it is |
+| Music | MP3, AAC (M4A), WAV, Ogg (Vorbis, Opus) | ✅ Plays, with the music screen |
+| Music | FLAC | ✅ On Android 8.1 and later; earlier versions have no FLAC decoder, so CastBay doesn't offer it there |
+| Pictures | JPEG, PNG, … | ❌ Not shown: photo apps don't offer CastBay, and a picture sent anyway is refused |
+
+A link the TV can't play shows "This TV can't play the video's format" and ends the cast. AirPlay video from iPhone apps always arrives as HLS. Copy-protected (DRM) videos and Microsoft Smooth Streaming aren't supported.
+
 ## Not supported
 
 - **Google Cast (Chromecast)**: CastBay currently does not support Google Cast media casting or screen mirroring. Use AirPlay or DLNA instead.
 - **Miracast and Android's own screen mirroring**: they need system access an app doesn't get.
+- **Photos over DLNA**: CastBay plays video and music, not pictures; to show photos, mirror the phone's screen.

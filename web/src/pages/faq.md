@@ -71,6 +71,8 @@ Some delay is, as with an Apple TV: the sender has to capture and compress its s
 
 Videos cast from apps are fetched by the TV itself. If your phone needs a proxy or VPN to open them (YouTube, for example), the TV needs one too. Screen mirroring isn't affected: the picture comes from the phone.
 
+If the TV says it can't play the video's format, the video's codec or container is one this TV can't decode (an older TV and H.265, for example), or it is copy-protected. [Compatibility](/compatibility) lists the formats CastBay plays over DLNA; pictures aren't among them.
+
 ### Why is Bilibili limited to 720p?
 
 Bilibili keeps 1080p and above for its own TV app; casting to other devices tops out at 720p. Use screen mirroring for 1080p.
