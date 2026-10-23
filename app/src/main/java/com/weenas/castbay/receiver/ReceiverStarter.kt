@@ -34,8 +34,8 @@ object ReceiverStarter {
             Diagnostics.record("start", "$why: starting the receiver")
             Log.i(TAG, "Starting the receiver ($why)")
         } catch (error: Exception) {
-            // e.g. ForegroundServiceStartNotAllowedException (Android 12+), or Android 15+
-            // refusing a mediaPlayback service from BOOT_COMPLETED.
+            // e.g. ForegroundServiceStartNotAllowedException (Android 12+). Android 15+ refusing
+            // media playback at boot comes later, in the service (AirPlayService.enterForeground).
             Diagnostics.record("start", "$why: not allowed (${error.javaClass.simpleName}: ${error.message?.take(80)})")
             Log.w(TAG, "Not allowed to start the receiver ($why)", error)
         }

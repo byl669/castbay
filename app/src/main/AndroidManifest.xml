@@ -17,15 +17,15 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- REQUEST_INSTALL_PACKAGES, for the in-app updater, is in src/selfUpdate/AndroidManifest.xml. -->
     <!--
-        Installing an update the person chose to download (About's Update button). Builds with
-        -Pcastbay.selfUpdate=false, for app stores, replace it with a permission that grants
-        nothing (see app/build.gradle.kts).
+        The receiver runs as a foreground service so casting survives the Home key: media playback,
+        and a connected device (the phones casting here; CHANGE_WIFI_MULTICAST_STATE above is what
+        Android 14 requires for that type). Started at boot on Android 15+, it can only be the latter.
     -->
-    <uses-permission android:name="${installPermission}" />
-    <!-- The receiver runs as a media-playback foreground service so casting survives the Home key. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
     <application
         android:allowBackup="true"
@@ -58,7 +58,7 @@
         <service
             android:name=".service.AirPlayService"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:foregroundServiceType="mediaPlayback|connectedDevice" />
 
         <!-- Hands a downloaded update to Android's installer. -->
         <provider

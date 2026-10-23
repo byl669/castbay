@@ -7,9 +7,12 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import androidx.core.app.ServiceCompat
 import com.weenas.castbay.MainActivity
+import com.weenas.castbay.util.Log
 
 class AirPlayService : Service() {
 
@@ -18,6 +21,13 @@ class AirPlayService : Service() {
         const val ACTION_STOP = "com.weenas.castbay.action.STOP_RECEIVER"
         const val CHANNEL_ID = "castbay_channel"
         const val NOTIFICATION_ID = 1
+        private const val TAG = "CastBayService"
+
+        /** Tried in turn; see [enterForeground]. */
+        private val FOREGROUND_TYPES = listOf(
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+        )
 
         /** Whether the receiver is up, for [com.weenas.castbay.receiver.ReceiverStarter]. */
         @Volatile var isReceiving = false
@@ -69,7 +79,10 @@ class AirPlayService : Service() {
         }
         if (running) return START_NOT_STICKY
 
-        startForeground(NOTIFICATION_ID, buildNotification(getString(com.weenas.castbay.R.string.notification_starting)))
+        if (!enterForeground(buildNotification(getString(com.weenas.castbay.R.string.notification_starting)))) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         val settings = ReceiverSettingsStore(this).load()
         // A finished day's usage statistics, if the person turned them on.
         kotlin.concurrent.thread(name = "CastBay-stats") { com.weenas.castbay.util.UsageStats.sendFinishedDays(applicationContext) }
@@ -118,6 +131,27 @@ class AirPlayService : Service() {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
+    }
+
+    /**
+     * Into the foreground, as media playback and a connected-device service (the phones casting
+     * here). Android 15 and later don't let a service started at boot (BOOT_COMPLETED) take on
+     * media playback, so the receiver then waits as a connected-device service alone, which is
+     * enough to keep it running. False if neither is allowed.
+     */
+    private fun enterForeground(notification: Notification): Boolean {
+        for (type in FOREGROUND_TYPES) {
+            try {
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
+                if (type != FOREGROUND_TYPES.first()) Diagnostics.record("service", "In the foreground as a connected device only")
+                return true
+            } catch (error: RuntimeException) {
+                // ForegroundServiceStartNotAllowedException (an IllegalStateException), or a SecurityException.
+                Diagnostics.record("service", "Foreground type $type not allowed (${error.javaClass.simpleName}: ${error.message?.take(80)})")
+                Log.w(TAG, "Foreground service type $type not allowed", error)
+            }
+        }
+        return false
     }
 
     private fun removeForeground() {
