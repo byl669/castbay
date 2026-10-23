@@ -60,4 +60,14 @@ class DlnaMediaTest {
         assertEquals("Tom & Jerry", DlnaMedia.unescape("Tom &amp; Jerry"))
         assertEquals("&#xZZ; stays", DlnaMedia.unescape("&#xZZ; stays"))
     }
+
+    @Test
+    fun tellsPicturesApart() {
+        assertTrue(DlnaMedia.parse("""<upnp:class>object.item.imageItem.photo</upnp:class>""", "http://pc/1").isImage)
+        assertTrue(DlnaMedia.parse("""<res protocolInfo="http-get:*:image/jpeg:*">x</res>""", "http://pc/1").isImage)
+        assertTrue(DlnaMedia.parse(null, "http://pc/IMG_0001.JPG").isImage)
+        assertFalse(DlnaMedia.parse(null, "http://cdn/v.mp4").isImage)
+        // The MIME type wins over a misleading extension.
+        assertFalse(DlnaMedia.parse("""<res protocolInfo="http-get:*:video/mp4:*">x</res>""", "http://cdn/cover.jpg").isImage)
+    }
 }

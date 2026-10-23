@@ -101,7 +101,10 @@ class DlnaRenderer(private val target: Target) {
                 if (url.isEmpty()) throw Soap.Fault(714, "Illegal MIME-type")
                 val newMetadata = action.args["CurrentURIMetaData"].orEmpty()
                 val app = sender.ifEmpty { DlnaSender.fromUrl(url) }
-                target.open(url, DlnaMedia.parse(newMetadata, url).copy(sender = app))
+                val media = DlnaMedia.parse(newMetadata, url).copy(sender = app)
+                // Pictures aren't shown (nor offered in GetProtocolInfo): refused, not played as a video that ends at once.
+                if (media.isImage) throw Soap.Fault(714, "Illegal MIME-type")
+                target.open(url, media)
                 uri = url
                 metadata = newMetadata
                 emptyList()

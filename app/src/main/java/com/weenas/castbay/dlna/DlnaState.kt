@@ -9,12 +9,15 @@ object DlnaState {
     const val NO_MEDIA = "NO_MEDIA_PRESENT"
     val TRANSPORT_STATES = listOf(STOPPED, PLAYING, PAUSED, TRANSITIONING, NO_MEDIA)
 
-    /** Media types we can play: anything ExoPlayer handles, as control points check before casting. */
+    /**
+     * Media types we can play: anything ExoPlayer handles, as control points check before
+     * casting. No pictures: CastBay doesn't show them, so photo apps shouldn't offer it.
+     */
     val SINK_PROTOCOL_INFO = listOf(
         "video/mp4", "video/x-flv", "video/flv", "video/mpeg", "video/x-matroska", "video/webm",
         "video/quicktime", "video/MP2T", "application/vnd.apple.mpegurl", "application/x-mpegURL",
         "application/dash+xml", "audio/mpeg", "audio/mp4", "audio/aac", "audio/flac", "audio/x-flac",
-        "audio/wav", "audio/ogg", "image/jpeg", "image/png"
+        "audio/wav", "audio/ogg"
     ).joinToString(",") { "http-get:*:$it:*" }
 
     /** UPnP durations are H+:MM:SS (fractions allowed on input). */

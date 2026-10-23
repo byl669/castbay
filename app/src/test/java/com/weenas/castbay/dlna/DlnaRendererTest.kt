@@ -155,4 +155,18 @@ class DlnaRendererTest {
             assertEquals(701, fault.code)
         }
     }
+
+    @Test
+    fun picturesAreRefusedNotPlayed() {
+        try {
+            call("SetAVTransportURI", "<CurrentURI>http://pc/IMG_0001.jpg</CurrentURI>")
+            fail("expected a fault")
+        } catch (fault: Soap.Fault) {
+            assertEquals(714, fault.code)
+        }
+        assertTrue(target.calls.none { it.startsWith("open") })
+        val sink = call("GetProtocolInfo", service = UpnpDescriptions.CONNECTION_MANAGER)["Sink"].orEmpty()
+        assertTrue("video/mp4" in sink)
+        assertTrue("image/" !in sink)
+    }
 }
