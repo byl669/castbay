@@ -1,0 +1,3 @@
+• Fixed a crash when an app cast a DASH video over DLNA; such videos now play.
+• HLS and DASH links without .m3u8 or .mpd play when the app says which they are.
+• FLAC is offered only on Android 8.1 and later.
