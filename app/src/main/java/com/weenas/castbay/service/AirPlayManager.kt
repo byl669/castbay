@@ -25,6 +25,8 @@ class AirPlayManager private constructor(private val context: Context) {
         /** Two heartbeats missed (they come every two seconds; the TCL's gaps stayed under 2.6 s). */
         private const val HEARTBEAT_TIMEOUT_MS = 5000L
         private const val DLNA_PROGRESS_MS = 500L
+        /** How long a finished DLNA video's screen waits for the next one ([StreamInfo.awaitingNext]). */
+        private const val NEXT_VIDEO_WAIT_MS = 30_000L
         private const val DLNA_SKIP_SEC = 10
         private const val MAX_COVER_BYTES = 5 * 1024 * 1024
         /** playback-info for an AirPlay sender whose video DLNA replaced: finished, so it ends its session. */
@@ -150,7 +152,7 @@ class AirPlayManager private constructor(private val context: Context) {
             ?: display.mode
         return largest.physicalWidth to largest.physicalHeight
     }
-    private val hlsPlayer = HlsPlayer(context, onFinished = ::onVideoStopped)
+    private val hlsPlayer = HlsPlayer(context, onFinished = ::onVideoFinished)
     @Volatile private var nowPlaying = NowPlaying()
     /** The sender's last volume (AirPlay dB), for the stats overlay. */
     @Volatile private var volumeDb: Float? = null
@@ -248,6 +250,8 @@ class AirPlayManager private constructor(private val context: Context) {
             // Like AirPlay video, it replaces whatever is on screen. Playback starts right away:
             // some senders never send Play after SetAVTransportURI.
             videoSource = VideoSource.DLNA
+            // The next video (an episode) has come.
+            mainHandler.removeCallbacks(stopAwaitingNext)
             videoRenderer.stop()
             audioRenderer.stop()
             applyVolume()
@@ -297,7 +301,9 @@ class AirPlayManager private constructor(private val context: Context) {
         }
 
         override fun stop() {
-            if (ours()) onVideoStopped(null)
+            // Apps may send Stop after a video ends, before casting the next: the wait goes on
+            // (the TV's Back key, or its timeout, ends it).
+            if (ours() && !currentStreamInfo.awaitingNext) onVideoStopped(null)
         }
 
         override fun seek(positionSec: Double) {
@@ -564,6 +570,7 @@ class AirPlayManager private constructor(private val context: Context) {
     private fun onVideoPlay(url: String, startPositionSec: Float) {
         // AirPlay video replaces any mirroring session (or DLNA video) on this receiver.
         videoSource = VideoSource.AIRPLAY
+        mainHandler.removeCallbacks(stopAwaitingNext)
         videoRenderer.stop()
         audioRenderer.stop()
         hlsPlayer.play(url, startPositionSec) {
@@ -777,7 +784,8 @@ class AirPlayManager private constructor(private val context: Context) {
     @Volatile private var dlnaSenderId = ""
 
     /** DLNA video or music is playing (until it stops or AirPlay replaces it). */
-    private fun dlnaCasting() = currentState == AirPlayConnectionState.Streaming && currentStreamInfo.isDlna
+    private fun dlnaCasting() =
+        currentState == AirPlayConnectionState.Streaming && currentStreamInfo.isDlna && !currentStreamInfo.awaitingNext
 
     /** How a DLNA sender is listed: its app ([com.weenas.castbay.dlna.DlnaSender]) and network address (it has no device name). */
     private fun dlnaDeviceName(app: String, address: String): String {
@@ -927,8 +935,36 @@ class AirPlayManager private constructor(private val context: Context) {
         hlsPlayer.stop()
     }
 
+    /**
+     * The player is done: the video ended, or failed with [error]. A DLNA video that played to
+     * its end waits for the next one (see [StreamInfo.awaitingNext]): apps such as iQiyi only
+     * cast the next episode once they see the last one stopped, which takes them a few seconds.
+     */
+    private fun onVideoFinished(error: String?) {
+        val stream = currentStreamInfo
+        if (error != null || !dlnaOnScreen() || stream.isAudioOnly || currentState != AirPlayConnectionState.Streaming) {
+            onVideoStopped(error)
+            return
+        }
+        Log.i(TAG, "DLNA video ended; waiting for the next one")
+        hlsPlayer.stop()
+        currentStreamInfo = stream.copy(awaitingNext = true, isPlaying = false)
+        notifyStateChange(currentState)
+        mainHandler.removeCallbacks(stopAwaitingNext)
+        mainHandler.postDelayed(stopAwaitingNext, NEXT_VIDEO_WAIT_MS)
+    }
+
+    /** No next video came: back to the home screen. */
+    private val stopAwaitingNext = Runnable {
+        if (currentStreamInfo.awaitingNext) {
+            Log.i(TAG, "No next DLNA video; back to the home screen")
+            onVideoStopped(null)
+        }
+    }
+
     /** [error] is shown on the waiting screen until the next connection. */
     private fun onVideoStopped(error: String?) {
+        mainHandler.removeCallbacks(stopAwaitingNext)
         hlsPlayer.stop()
         if (currentStreamInfo.isDlna && currentStreamInfo.isAudioOnly) {
             nowPlaying = NowPlaying()

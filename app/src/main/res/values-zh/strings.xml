@@ -53,6 +53,8 @@
 
     <!-- Playback -->
     <string name="press_back_again">再按一次返回键结束投屏</string>
+    <string name="awaiting_next_video">等待下一集…</string>
+    <string name="awaiting_next_video_help">按返回键结束投屏</string>
     <string name="press_back_to_quit">再按一次返回键退出映湾，手机将无法投屏</string>
     <string name="airplay_audio">AirPlay 音频</string>
     <string name="cover_art">封面</string>

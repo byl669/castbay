@@ -51,6 +51,8 @@
 
     <!-- Playback -->
     <string name="press_back_again">Press Back again to stop casting</string>
+    <string name="awaiting_next_video">Waiting for the next video…</string>
+    <string name="awaiting_next_video_help">Press Back to stop casting</string>
     <string name="press_back_to_quit">Press Back again to quit CastBay; phones won\'t be able to cast</string>
     <string name="airplay_audio">AirPlay audio</string>
     <string name="cover_art">Cover art</string>

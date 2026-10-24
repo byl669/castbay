@@ -36,5 +36,10 @@ data class StreamInfo(
      * id from [com.weenas.castbay.dlna.DlnaSender] ("iqiyi"); empty when unknown.
      */
     val sender: String = "",
-    val nowPlaying: NowPlaying = NowPlaying()
+    val nowPlaying: NowPlaying = NowPlaying(),
+    /**
+     * A DLNA video played to its end, and the screen waits a while for the app to cast the
+     * next one (an episode) rather than going back to the home screen in between.
+     */
+    val awaitingNext: Boolean = false
 )

@@ -96,7 +96,7 @@ Click Control Center in the menu bar → Screen Mirroring, and choose CastBay. S
 
 ## Casting from an Android phone
 
-Use an app's own cast button (DLNA): in Bilibili, iQiyi, NetEase Cloud Music, QQ Music and similar apps, tap the cast button on the player (usually a TV icon) and choose CastBay. DLNA casting must be on in Settings (it is by default). These apps' buttons work from iPhones too.
+Use an app's own cast button (DLNA): in Bilibili, iQiyi, NetEase Cloud Music, QQ Music and similar apps, tap the cast button on the player (usually a TV icon) and choose CastBay. DLNA casting must be on in Settings (it is by default). These apps' buttons work from iPhones too. When a DLNA video plays to its end, the TV shows "Waiting for the next video…" for up to 30 seconds instead of going back to the home screen, so a series carries on to the next episode the app casts; press Back to stop.
 
 ## The first time a device connects
 

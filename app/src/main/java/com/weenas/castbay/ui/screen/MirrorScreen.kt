@@ -203,7 +203,10 @@ fun MirrorScreen(viewModel: AirPlayViewModel) {
         ) {
             val contentModifier = Modifier.focusRequester(contentFocus)
             when (kind) {
-                StreamKind.VIDEO -> VideoPlayback(viewModel = viewModel, pictureMode = settings.pictureMode, modifier = contentModifier)
+                StreamKind.VIDEO -> VideoPlayback(
+                    viewModel = viewModel, pictureMode = settings.pictureMode, awaitingNext = stream.awaitingNext,
+                    modifier = contentModifier
+                )
                 StreamKind.AUDIO -> {
                     AudioPlayback(
                         nowPlaying = song,
@@ -1099,7 +1102,7 @@ private fun formatTime(seconds: Double): String {
  * (OK / play-pause) and skip 10 s (left/right, rewind/fast-forward).
  */
 @Composable
-fun VideoPlayback(viewModel: AirPlayViewModel, pictureMode: String, modifier: Modifier = Modifier) {
+fun VideoPlayback(viewModel: AirPlayViewModel, pictureMode: String, awaitingNext: Boolean = false, modifier: Modifier = Modifier) {
     val player = viewModel.videoPlayer
     var paused by remember(player) { mutableStateOf(player?.playWhenReady == false) }
     DisposableEffect(player) {
@@ -1153,7 +1156,16 @@ fun VideoPlayback(viewModel: AirPlayViewModel, pictureMode: String, modifier: Mo
             onRelease = { it.player = null },
             modifier = Modifier.fillMaxSize()
         )
-        if (paused) {
+        if (awaitingNext) {
+            // A DLNA video ended: the app casts the next episode in a few seconds.
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(color = Color.White, strokeWidth = 4.dp, modifier = Modifier.size(56.dp))
+                Spacer(Modifier.height(24.dp))
+                Text(stringResource(R.string.awaiting_next_video), fontSize = 26.sp, color = Color.White)
+                Spacer(Modifier.height(8.dp))
+                Text(stringResource(R.string.awaiting_next_video_help), fontSize = 18.sp, color = Color(0xB3FFFFFF))
+            }
+        } else if (paused) {
             Box(
                 modifier = Modifier
                     .size(120.dp)
