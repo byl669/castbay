@@ -9,6 +9,8 @@ description = "Command-line CastBay Desktop sender, for tests and benchmarks"
 [dependencies]
 castbay-capture = { path = "../capture" }
 castbay-encode = { path = "../encode" }
+castbay-link = { path = "../link" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.61"

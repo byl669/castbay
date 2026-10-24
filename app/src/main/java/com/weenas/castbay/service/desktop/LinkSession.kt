@@ -199,9 +199,10 @@ class LinkSession(
             while (!closing) {
                 try {
                     Thread.sleep(1000)
-                    val stats = host.videoStats() ?: continue
-                    send(JSONObject().put("t", "stats").put("decode_ms", stats.decodeLatencyMs ?: -1)
-                        .put("dropped", stats.droppedFrames).put("fps", stats.fps ?: 0.0))
+                    // Also while nothing decodes (no screen yet): the sender hears that we are alive.
+                    val stats = host.videoStats()
+                    send(JSONObject().put("t", "stats").put("decode_ms", stats?.decodeLatencyMs ?: -1)
+                        .put("dropped", stats?.droppedFrames ?: 0).put("fps", stats?.fps ?: 0.0))
                 } catch (e: Exception) {
                     return@Thread
                 }
