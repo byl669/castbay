@@ -34,6 +34,7 @@
     <string name="info_network">Network</string>
     <string name="info_ip">IP address</string>
     <string name="info_mirroring">Mirroring</string>
+    <string name="info_desktop">Desktop casting</string>
     <string name="info_dlna">DLNA casting</string>
     <string name="info_second_device">Second device</string>
     <string name="info_takes_over">Takes over</string>
@@ -112,6 +113,7 @@
     <string name="setting_frame_rate">Maximum Frame Rate</string>
     <string name="setting_codec">Codec</string>
     <string name="setting_codec_h264_only">H.264 only</string>
+    <string name="setting_desktop">Desktop casting (CastBay Desktop)</string>
     <string name="setting_dlna">DLNA casting (apps\' cast button)</string>
     <string name="setting_password_field">Password</string>
     <string name="setting_password_too_short">Use at least %1$d digits.</string>

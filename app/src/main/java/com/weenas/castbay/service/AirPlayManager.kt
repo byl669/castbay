@@ -210,6 +210,7 @@ class AirPlayManager private constructor(private val context: Context) {
         override fun authorize(address: String, sender: String, opening: Boolean) {
             val deviceId = AccessPolicy.dlnaDeviceId(address)
             val onScreen = when {
+                desktopCasting() -> desktopSenderId
                 airPlayBusy() -> airPlaySenderId.ifEmpty { "airplay" }
                 dlnaCasting() -> dlnaSenderId
                 else -> null
@@ -236,6 +237,7 @@ class AirPlayManager private constructor(private val context: Context) {
                 throw com.weenas.castbay.dlna.Soap.Fault(701, refusal)
             }
             if (!opening) return
+            endDesktopSession()
             knownDevices.put(KnownDevice(deviceId, dlnaDeviceName(sender, address), "DLNA", allowed = true))
             if (_deviceRequest.value?.deviceId == deviceId) _deviceRequest.value = null
             dlnaSenderId = deviceId
@@ -371,7 +373,8 @@ class AirPlayManager private constructor(private val context: Context) {
             // Usage statistics (counted only if the person turned them on).
             if (value == AirPlayConnectionState.Streaming && was != AirPlayConnectionState.Streaming) {
                 val stream = currentStreamInfo
-                UsageStats.castStarted(
+                // The statistics have no counter for computers yet.
+                if (!stream.isDesktop) UsageStats.castStarted(
                     if (stream.isDlna) "dlna" else "airplay",
                     when {
                         stream.isVideoPlayback -> "video"
@@ -459,6 +462,18 @@ class AirPlayManager private constructor(private val context: Context) {
         currentState = AirPlayConnectionState.Registering
         // DLNA (video apps' own cast buttons, e.g. Bilibili's) runs beside AirPlay.
         if (settings.dlnaEnabled) Thread({ dlna.start(settings.advertisedName, dlnaTarget) }, "DLNA-start").start()
+        // CastBay Desktop: computers casting over CastBay Link.
+        if (settings.desktopEnabled) {
+            Thread({
+                try {
+                    val port = linkServer.start()
+                    linkDiscovery.start(settings.advertisedName, port, linkServer.identityId, settings)
+                } catch (error: Throwable) {
+                    // Whatever an old Android's Keystore or TLS does, AirPlay and DLNA go on.
+                    Log.e(TAG, "CastBay Link did not start", error)
+                }
+            }, "Link-start").start()
+        }
         return true
     }
 
@@ -506,6 +521,10 @@ class AirPlayManager private constructor(private val context: Context) {
         hidePairingPin()
         discoveryAdvertiser.stop()
         dlna.stop()
+        linkDiscovery.stop()
+        linkServer.stop()
+        desktopSession = null
+        desktopSenderId = ""
         videoRenderer.stop()
         audioRenderer.stop()
         hlsPlayer.stop()
@@ -544,6 +563,8 @@ class AirPlayManager private constructor(private val context: Context) {
     }
 
     fun onNativeStreamStopped() {
+        // An AirPlay session that ended while a computer casts must not clear its screen.
+        if (desktopCasting()) return
         lastHeartbeatAtMs = 0L
         videoRenderer.stop()
         audioRenderer.stop()
@@ -761,7 +782,8 @@ class AirPlayManager private constructor(private val context: Context) {
         val label = name.trim().ifEmpty { model }
         // A second AirPlay sender is refused (or let take over) by UxPlay; one while DLNA plays, here.
         val decision = AccessPolicy.decide(
-            activeSettings, deviceId, knownDevices.find(deviceId), dlnaSenderId.takeIf { dlnaCasting() },
+            activeSettings, deviceId, knownDevices.find(deviceId),
+            dlnaSenderId.takeIf { dlnaCasting() } ?: desktopSenderId.takeIf { desktopCasting() },
             AccessPolicy.airPlayNeedsApproval(activeSettings)
         )
         when (decision) {
@@ -770,7 +792,7 @@ class AirPlayManager private constructor(private val context: Context) {
                 return false
             }
             AccessPolicy.Decision.BUSY -> {
-                Log.i(TAG, "Refused AirPlay sender ${Log.personal(label)} ($model): another device is casting over DLNA")
+                Log.i(TAG, "Refused AirPlay sender ${Log.personal(label)} ($model): another device is casting")
                 return false
             }
             AccessPolicy.Decision.ASK -> {
@@ -785,6 +807,7 @@ class AirPlayManager private constructor(private val context: Context) {
         // Admitted: a PIN it was entering, or a request it made, is done with.
         hidePairingPin()
         if (_deviceRequest.value?.deviceId == deviceId) _deviceRequest.value = null
+        endDesktopSession()
         val previous = airPlaySenderId
         airPlaySender = label
         airPlaySenderId = deviceId
@@ -793,6 +816,112 @@ class AirPlayManager private constructor(private val context: Context) {
     }
 
     private val knownDevices = KnownDevices(context)
+
+    // CastBay Desktop (CastBay Link): the receiver side of a computer casting its screen.
+    @Volatile private var desktopSession: Any? = null
+    @Volatile private var desktopSenderId = ""
+
+    /** Starting and ending a desktop session (the decoder takes a while to stop) never overlap. */
+    private val desktopLock = Any()
+
+    private fun desktopCasting() = desktopSenderId.isNotEmpty()
+
+    /** An AirPlay session is on screen (mirroring, music or video). */
+    private fun airPlayStreaming(): Boolean {
+        val stream = currentStreamInfo
+        return currentState == AirPlayConnectionState.Streaming && !stream.isDlna && desktopSenderId.isEmpty() &&
+            (stream.isMirroring || stream.isAudioOnly || stream.isVideoPlayback)
+    }
+
+    /** Another sender takes the screen: a desktop session makes way for it. */
+    private fun endDesktopSession() {
+        if (!desktopCasting()) return
+        Log.i(TAG, "Desktop session ends: another sender took over")
+        desktopSession = null
+        desktopSenderId = ""
+        linkServer.endSession()
+    }
+
+    private val linkHost = object : com.weenas.castbay.service.desktop.LinkHost {
+        override val receiverName: String get() = activeSettings.advertisedName
+
+        override fun settings() = activeSettings
+
+        override fun admission(deviceId: String, name: String, paired: Boolean): com.weenas.castbay.service.desktop.LinkAdmission {
+            val settings = activeSettings
+            val onScreen = when {
+                desktopCasting() -> desktopSenderId
+                dlnaCasting() -> dlnaSenderId
+                airPlayStreaming() -> airPlaySenderId.ifEmpty { "airplay" }
+                else -> null
+            }
+            val decision = AccessPolicy.decide(
+                settings, deviceId, knownDevices.find(deviceId), onScreen, AccessPolicy.desktopNeedsApproval(settings) && !paired
+            )
+            Log.d(TAG, "Desktop sender $deviceId: $decision (on screen: ${onScreen ?: "nothing"}; state $currentState, ${currentStreamInfo.copy(sourceName = "")})")
+            return when (decision) {
+                AccessPolicy.Decision.BLOCKED -> com.weenas.castbay.service.desktop.LinkAdmission.BLOCKED
+                AccessPolicy.Decision.BUSY -> com.weenas.castbay.service.desktop.LinkAdmission.BUSY
+                AccessPolicy.Decision.ASK -> com.weenas.castbay.service.desktop.LinkAdmission.NEEDS_APPROVAL
+                AccessPolicy.Decision.ADMIT ->
+                    if (!paired && AccessPolicy.desktopNeedsCode(settings)) com.weenas.castbay.service.desktop.LinkAdmission.NEEDS_CODE
+                    else com.weenas.castbay.service.desktop.LinkAdmission.ADMIT
+            }
+        }
+
+        override fun requestApproval(deviceId: String, name: String) {
+            Log.i(TAG, "New desktop sender needs approval: ${Log.personal(name)}")
+            _deviceRequest.value = DeviceRequest(deviceId, name, "CastBay Desktop")
+        }
+
+        override fun showCode(code: String) = showPairingPin(code)
+
+        override fun hideCode() = hidePairingPin()
+
+        override fun remember(deviceId: String, name: String) {
+            knownDevices.put(KnownDevice(deviceId, name, "CastBay Desktop", allowed = true))
+            if (_deviceRequest.value?.deviceId == deviceId) _deviceRequest.value = null
+        }
+
+        override fun sessionStarted(session: Any, deviceId: String, name: String, width: Int, height: Int, fps: Int) {
+            Log.i(TAG, "Desktop sender: ${Log.personal(name)}, ${width}x$height")
+            synchronized(desktopLock) {
+                // Another sender on screen (a second device taking over is allowed): it makes way.
+                if (dlnaOnScreen()) stopDlnaVideo()
+                if (airPlayStreaming()) nativeBridge.disconnect()
+                mainHandler.removeCallbacks(stopAwaitingNext)
+                desktopSession = session
+                desktopSenderId = deviceId
+                videoRenderer.configure(width, height)
+                currentStreamInfo = StreamInfo(
+                    sourceName = name, sourceModel = "CastBay Desktop", videoWidth = width, videoHeight = height,
+                    videoFps = fps, audioSampleRate = 0, audioChannels = 0, isMirroring = true, isPlaying = true, isDesktop = true, sender = name
+                )
+                currentError = null
+                currentState = AirPlayConnectionState.Streaming
+            }
+        }
+
+        override fun video(data: ByteArray, presentationTimeUs: Long) = videoRenderer.render(data, presentationTimeUs)
+
+        override fun sessionEnded(session: Any) {
+            synchronized(desktopLock) {
+                Log.d(TAG, "Desktop session ended (current: ${desktopSession === session})")
+                if (desktopSession !== session) return
+                // The screen is free at once; stopping the decoder takes a moment.
+                desktopSession = null
+                desktopSenderId = ""
+                currentStreamInfo = StreamInfo()
+                currentState = AirPlayConnectionState.Discovering
+                videoRenderer.stop()
+            }
+        }
+
+        override fun videoStats() = videoRenderer.stats()
+    }
+
+    private val linkServer = com.weenas.castbay.service.desktop.LinkServer(context, linkHost)
+    private val linkDiscovery = com.weenas.castbay.service.desktop.LinkDiscovery(context)
 
     /** The DLNA sender last admitted ([AccessPolicy.dlnaDeviceId]); casting while [dlnaCasting]. */
     @Volatile private var dlnaSenderId = ""
@@ -838,6 +967,7 @@ class AirPlayManager private constructor(private val context: Context) {
      */
     fun forgetDevices() {
         knownDevices.clear()
+        linkServer.forgetPairings()
         if (pairedDevices.load().isNotEmpty()) forgetPairedDevices()
     }
 
@@ -872,6 +1002,17 @@ class AirPlayManager private constructor(private val context: Context) {
      */
     fun endCasting() {
         Log.i(TAG, "Casting ended from the TV")
+        if (desktopCasting()) {
+            synchronized(desktopLock) {
+                desktopSession = null
+                desktopSenderId = ""
+                currentStreamInfo = StreamInfo()
+                currentState = AirPlayConnectionState.Discovering
+                linkServer.endSession()
+                videoRenderer.stop()
+            }
+            return
+        }
         if (dlnaOnScreen()) {
             onVideoStopped(null)
             return

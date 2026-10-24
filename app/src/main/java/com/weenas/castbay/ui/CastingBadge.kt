@@ -37,7 +37,11 @@ import com.weenas.castbay.service.StreamInfo
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CastingBadge(stream: StreamInfo, maxWidth: Dp, modifier: Modifier = Modifier) {
-    val protocol = if (stream.isDlna) "DLNA" else "AirPlay"
+    val protocol = when {
+        stream.isDlna -> "DLNA"
+        stream.isDesktop -> "CastBay Desktop"
+        else -> "AirPlay"
+    }
     val sender = if (stream.isDlna) dlnaSenderLabel(stream.sender) else stream.sender
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -49,7 +53,7 @@ fun CastingBadge(stream: StreamInfo, maxWidth: Dp, modifier: Modifier = Modifier
         }
         Row(modifier = Modifier.widthIn(max = maxWidth), verticalAlignment = Alignment.CenterVertically) {
             Icon(
-                if (stream.isDlna) MediaIcons.Tv else MediaIcons.AirPlay,
+                if (stream.isDlna || stream.isDesktop) MediaIcons.Tv else MediaIcons.AirPlay,
                 contentDescription = null,
                 tint = SECONDARY,
                 modifier = Modifier.size(24.dp)

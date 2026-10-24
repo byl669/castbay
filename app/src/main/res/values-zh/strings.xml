@@ -35,6 +35,7 @@
     <string name="info_network">网络</string>
     <string name="info_ip">IP 地址</string>
     <string name="info_mirroring">屏幕镜像</string>
+    <string name="info_desktop">电脑投屏</string>
     <string name="info_dlna">DLNA 投屏</string>
     <string name="info_second_device">其他设备投屏</string>
     <string name="info_takes_over">接管</string>
@@ -114,6 +115,7 @@
     <string name="setting_frame_rate">最大帧率</string>
     <string name="setting_codec">编码</string>
     <string name="setting_codec_h264_only">仅 H.264</string>
+    <string name="setting_desktop">电脑投屏（映湾 Desktop）</string>
     <string name="setting_dlna">DLNA 投屏（App 自带投屏按钮）</string>
     <string name="setting_password_field">密码</string>
     <string name="setting_password_too_short">至少 %1$d 位数字。</string>

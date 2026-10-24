@@ -29,6 +29,8 @@ data class ReceiverSettings(
     val allowTakeover: Boolean = false,
     /** Also act as a DLNA renderer, for video apps' own "cast" buttons (Bilibili, iQiyi, ...). */
     val dlnaEnabled: Boolean = true,
+    /** CastBay Desktop: computers casting with the CastBay Link protocol. */
+    val desktopEnabled: Boolean = true,
     /** Show a "stats for nerds" overlay (codec, resolution, bitrate, ...) while playing. */
     val showStats: Boolean = false,
     /** How mirroring and AirPlay video fill the screen: [PICTURE_FIT], [PICTURE_FILL] or [PICTURE_STRETCH]. */
@@ -155,6 +157,7 @@ class ReceiverSettingsStore(context: Context) {
             ?: legacyAccess(),
         allowTakeover = preferences.getBoolean("allow_takeover", false),
         dlnaEnabled = preferences.getBoolean("dlna_enabled", true),
+        desktopEnabled = preferences.getBoolean("desktop_enabled", true),
         showStats = preferences.getBoolean("show_stats", false),
         pictureMode = preferences.getString("picture_mode", null)
             ?.takeIf { it in ReceiverSettings.PICTURE_MODES } ?: ReceiverSettings.PICTURE_FIT,
@@ -186,6 +189,7 @@ class ReceiverSettingsStore(context: Context) {
             .remove("require_password")
             .putBoolean("allow_takeover", settings.allowTakeover)
             .putBoolean("dlna_enabled", settings.dlnaEnabled)
+            .putBoolean("desktop_enabled", settings.desktopEnabled)
             // Receiving can no longer be turned off (Back twice on the home screen quits).
             .remove("start_on_boot")
             .putBoolean("show_stats", settings.showStats)

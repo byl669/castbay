@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""A test sender for CastBay Link (desktop/docs/protocol.md): casts a generated H.264 test
+stream to a receiver, to test the receiver without a computer app. Standard library only,
+plus ffmpeg and openssl on the PATH.
+
+  tools/link-send HOST PORT [--seconds N] [--name NAME] [--identity DIR]
+                            [--code auto|DIGITS] [--password PW] [--fps N] [--size WxH]
+                            [--wait-code SECONDS] [--no-video] [--hold]
+
+The port is in the receiver's log ("CastBay Link on port ..."). --identity keeps the
+sender's key between runs (a paired sender stays paired). --code auto types the code
+the receiver shows, as a user would (computed from the two certificates); a number types
+that one instead. --hold keeps the connection open without video.
+"""
+import argparse, hashlib, json, os, socket, ssl, struct, subprocess, sys, threading, time
+
+def der(data, pos):
+    """One DER element at pos: (tag, start of content, end)."""
+    tag = data[pos]
+    length = data[pos + 1]
+    pos += 2
+    if length & 0x80:
+        n = length & 0x7F
+        length = int.from_bytes(data[pos:pos + n], "big")
+        pos += n
+    return tag, pos, pos + length
+
+def spki_fingerprint(cert_der):
+    """SHA-256 of the SubjectPublicKeyInfo of an X.509 certificate (32 raw bytes)."""
+    _, start, _ = der(cert_der, 0)            # Certificate
+    _, tbs, _ = der(cert_der, start)          # TBSCertificate
+    pos = tbs
+    tag, s, e = der(cert_der, pos)
+    if tag == 0xA0:                           # explicit version
+        pos = e
+    for _ in range(5):                        # serial, signature, issuer, validity, subject
+        _, _, e = der(cert_der, pos)
+        pos = e
+    _, _, e = der(cert_der, pos)              # subjectPublicKeyInfo
+    return hashlib.sha256(cert_der[pos:e]).digest()
+
+def verification_code(receiver_fp, sender_fp):
+    d = hashlib.sha256(b"castbay-link-sas-v1" + receiver_fp + sender_fp).digest()
+    return "%06d" % (int.from_bytes(d[:4], "big") % 1000000)
+
+def identity(directory):
+    os.makedirs(directory, exist_ok=True)
+    key, cert = os.path.join(directory, "key.pem"), os.path.join(directory, "cert.pem")
+    if not os.path.exists(cert):
+        subprocess.run(["openssl", "ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", key], check=True, capture_output=True)
+        subprocess.run(["openssl", "req", "-new", "-x509", "-key", key, "-out", cert, "-days", "3650",
+                        "-subj", "/CN=CastBay Desktop test sender", "-sha256"], check=True, capture_output=True)
+    return key, cert
+
+def send(sock, obj):
+    payload = json.dumps(obj).encode()
+    sock.sendall(b"\x01" + struct.pack(">I", len(payload)) + payload)
+
+def send_video(sock, pts_us, key, data):
+    body = struct.pack(">QB", pts_us, 1 if key else 0) + data
+    sock.sendall(b"\x02" + struct.pack(">I", len(body)) + body)
+
+def read_exact(sock, n):
+    out = b""
+    while len(out) < n:
+        chunk = sock.recv(n - len(out))
+        if not chunk:
+            raise EOFError
+        out += chunk
+    return out
+
+def read_message(sock):
+    head = read_exact(sock, 5)
+    length = struct.unpack(">I", head[1:])[0]
+    body = read_exact(sock, length)
+    return head[0], (json.loads(body) if head[0] == 1 else body)
+
+def expect(sock, *types):
+    kind, msg = read_message(sock)
+    if kind != 1 or msg.get("t") not in types:
+        raise SystemExit("unexpected message: %r" % (msg,))
+    return msg
+
+def access_units(data):
+    """Splits an Annex B stream at access unit delimiters (NAL type 9)."""
+    marks, i = [], 0
+    while True:
+        i = data.find(b"\x00\x00\x01\x09", i)
+        if i < 0:
+            break
+        marks.append(i - 1 if i > 0 and data[i - 1] == 0 else i)
+        i += 4
+    marks.append(len(data))
+    return [data[a:b] for a, b in zip(marks, marks[1:])]
+
+def has_idr(unit):
+    i = 0
+    while True:
+        i = unit.find(b"\x00\x00\x01", i)
+        if i < 0 or i + 3 >= len(unit):
+            return False
+        if unit[i + 3] & 0x1F == 5:
+            return True
+        i += 3
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("host"); p.add_argument("port", type=int)
+    p.add_argument("--seconds", type=float, default=10)
+    p.add_argument("--name", default="Test Computer")
+    p.add_argument("--identity", default=os.path.expanduser("~/.castbay-link-test"))
+    p.add_argument("--code", default=None)
+    p.add_argument("--password", default=None)
+    p.add_argument("--fps", type=int, default=30)
+    p.add_argument("--size", default="1280x720")
+    p.add_argument("--wait-code", type=float, default=0, help="seconds to wait before typing the code (to look at the TV)")
+    p.add_argument("--no-video", action="store_true")
+    p.add_argument("--hold", action="store_true")
+    a = p.parse_args()
+    width, height = map(int, a.size.split("x"))
+    key, cert = identity(a.identity)
+    my_fp = spki_fingerprint(ssl.PEM_cert_to_DER_cert(open(cert).read()))
+
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    ctx.load_cert_chain(cert, key)
+    raw = socket.create_connection((a.host, a.port), timeout=15)
+    sock = ctx.wrap_socket(raw)
+    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    receiver_fp = spki_fingerprint(sock.getpeercert(binary_form=True))
+    print("connected:", sock.version(), "receiver", receiver_fp.hex()[:16], "me", my_fp.hex()[:16])
+
+    hello = {"t": "hello", "v": 1, "name": a.name, "id": my_fp.hex()[:16], "app": "link-send test", "os": "test"}
+    if a.password is not None:
+        hello["password"] = a.password
+    send(sock, hello)
+    first = expect(sock, "hello")
+    print("receiver:", first.get("name"), first.get("id"))
+    while True:
+        msg = expect(sock, "reject", "pair_required", "pair_result", "ready")
+        t = msg["t"]
+        if t == "reject":
+            print("REJECTED:", msg.get("reason")); return 3
+        if t == "pair_required":
+            code = verification_code(receiver_fp, my_fp) if a.code in (None, "auto") else a.code
+            print("pairing, typing code", code)
+            time.sleep(a.wait_code)
+            send(sock, {"t": "pair", "sas": code})
+        elif t == "pair_result":
+            print("pair result:", msg)
+            if not msg.get("ok"):
+                return 4
+        else:
+            break
+    send(sock, {"t": "offer", "codec": "h264", "width": width, "height": height, "fps": a.fps, "bitrate": 8000000, "source": "screen"})
+    msg = expect(sock, "accept", "reject")
+    if msg["t"] == "reject":
+        print("REJECTED:", msg.get("reason")); return 3
+    print("accepted")
+
+    stop = threading.Event()
+    keyframes = []
+    def reader():
+        try:
+            while not stop.is_set():
+                kind, m = read_message(sock)
+                if kind == 1:
+                    if m.get("t") == "keyframe": keyframes.append(time.time())
+                    elif m.get("t") == "stats": print("stats:", m)
+                    elif m.get("t") == "bye": print("receiver ended:", m.get("reason")); stop.set()
+        except Exception:
+            stop.set()
+    threading.Thread(target=reader, daemon=True).start()
+
+    if a.hold or a.no_video:
+        end = time.time() + a.seconds
+        while time.time() < end and not stop.is_set():
+            send(sock, {"t": "ping"}); time.sleep(2)
+        send(sock, {"t": "bye", "reason": "done"}); return 0
+
+    stream = subprocess.run(
+        ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=%s:rate=%d" % (a.size, a.fps),
+         "-t", str(a.seconds), "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-bf", "0",
+         "-g", str(a.fps * 2), "-pix_fmt", "yuv420p", "-bsf:v", "h264_metadata=aud=insert", "-f", "h264", "-"],
+        capture_output=True, check=True).stdout
+    units = access_units(stream)
+    print("sending %d units" % len(units))
+    start = time.time()
+    last_ping = 0
+    for i, unit in enumerate(units):
+        if stop.is_set(): break
+        due = start + i / a.fps
+        time.sleep(max(0, due - time.time()))
+        send_video(sock, int((time.time() - start) * 1e6), has_idr(unit), unit)
+        if time.time() - last_ping > 2:
+            send(sock, {"t": "ping"}); last_ping = time.time()
+    time.sleep(0.5)
+    print("key frame requests:", len(keyframes))
+    try: send(sock, {"t": "bye", "reason": "done"})
+    except Exception: pass
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())

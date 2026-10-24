@@ -46,4 +46,18 @@ class AccessPolicyTest {
         assertFalse(AccessPolicy.airPlayNeedsApproval(ReceiverSettings(access = ReceiverSettings.ACCESS_PIN)))
         assertEquals("dlna:192.168.1.5", AccessPolicy.dlnaDeviceId("::ffff:192.168.1.5"))
     }
+
+    @Test
+    fun desktopSendersAskOrNeedACodeDependingOnTheVerification() {
+        assertFalse(AccessPolicy.desktopNeedsApproval(open))
+        assertFalse(AccessPolicy.desktopNeedsCode(open))
+        assertTrue(AccessPolicy.desktopNeedsApproval(confirm))
+        assertFalse(AccessPolicy.desktopNeedsCode(confirm))
+        for (access in listOf(ReceiverSettings.ACCESS_PIN, ReceiverSettings.ACCESS_PASSWORD)) {
+            val settings = ReceiverSettings(access = access)
+            assertFalse(AccessPolicy.desktopNeedsApproval(settings))
+            assertTrue(AccessPolicy.desktopNeedsCode(settings))
+        }
+        assertEquals("desktop:0123456789abcdef", AccessPolicy.desktopDeviceId("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"))
+    }
 }

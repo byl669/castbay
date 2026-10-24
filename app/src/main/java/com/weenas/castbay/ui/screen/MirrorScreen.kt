@@ -602,6 +602,7 @@ fun ReceiverInfo(viewModel: AirPlayViewModel) {
         InfoRow(stringResource(R.string.info_ip), network.ipv4.joinToString(", ").ifEmpty { "—" })
         val mirroring = remember(settings) { viewModel.mirroringProfile(settings) }
         InfoRow(stringResource(R.string.info_mirroring), mirroringLabel(mirroring))
+        InfoRow(stringResource(R.string.info_desktop), stringResource(if (settings.desktopEnabled) R.string.on else R.string.off))
         InfoRow(stringResource(R.string.info_dlna), stringResource(if (settings.dlnaEnabled) R.string.on else R.string.off))
         InfoRow(stringResource(R.string.info_access), accessLabel(settings.access))
         InfoRow(stringResource(R.string.info_second_device), stringResource(if (settings.allowTakeover) R.string.info_takes_over else R.string.info_refused))
