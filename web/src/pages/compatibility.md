@@ -66,6 +66,7 @@ Apps' own cast button (DLNA) sends the TV a link, and the TV plays it. CastBay t
 | Streaming video | HLS (.m3u8), DASH (.mpd) | ✅ Plays, adapting to the network; a link without .m3u8 or .mpd plays if the app says which it is |
 | Music | MP3, AAC (M4A), WAV, Ogg (Vorbis, Opus) | ✅ Plays, with the music screen |
 | Music | FLAC | ✅ On Android 8.1 and later; earlier versions have no FLAC decoder, so CastBay doesn't offer it there |
+| Subtitle files | SRT, WebVTT, ASS/SSA, TTML | ✅ Shown when the app sends them with the video (e.g. NAS and media-server apps); Chinese files in GBK are read correctly; they can be turned off in the quick menu |
 | Pictures | JPEG, PNG, … | ❌ Not shown: photo apps don't offer CastBay, and a picture sent anyway is refused |
 
 A link the TV can't play shows "This TV can't play the video's format" and ends the cast. AirPlay video from iPhone apps always arrives as HLS. Copy-protected (DRM) videos and Microsoft Smooth Streaming aren't supported.

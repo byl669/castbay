@@ -1,0 +1,3 @@
+• Series over DLNA go straight on to the next episode, without flashing the home screen.
+• A DLNA video that ends waits up to 30 s for the next one.
+• Subtitle files sent with DLNA videos (SRT, WebVTT, ASS, TTML) are shown, GBK included.
