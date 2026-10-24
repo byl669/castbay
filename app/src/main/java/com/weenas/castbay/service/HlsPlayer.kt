@@ -152,14 +152,40 @@ class HlsPlayer(
     /**
      * [onStarted] runs on the main thread once [player] exists, so the UI can attach it.
      * [mimeType] is the sender's, where it says (DLNA): it tells HLS and DASH links apart.
+     * [subtitles] (DLNA) are fetched first, so the video starts with them.
      */
-    fun play(url: String, startPositionSec: Float, mimeType: String? = null, onStarted: () -> Unit) {
+    fun play(
+        url: String,
+        startPositionSec: Float,
+        mimeType: String? = null,
+        subtitles: List<com.weenas.castbay.dlna.DlnaSubtitle> = emptyList(),
+        onStarted: () -> Unit
+    ) {
         // Mark active right away: the sender polls playback info while the post is pending.
         snapshot = Snapshot(positionSec = startPositionSec.toDouble(), state = AirPlayNative.PLAYBACK_ACTIVE)
-        main.post { startOnMain(url, startPositionSec, mimeType, onStarted) }
+        val start = starts.incrementAndGet()
+        if (subtitles.isEmpty()) {
+            main.post { startOnMain(start, url, startPositionSec, mimeType, emptyList(), onStarted) }
+        } else {
+            kotlin.concurrent.thread(name = "CastBay-subtitles") {
+                val tracks = subtitles.mapNotNull { SubtitleFiles.load(it.url, it.format) }
+                main.post { startOnMain(start, url, startPositionSec, mimeType, tracks, onStarted) }
+            }
+        }
     }
 
-    private fun startOnMain(url: String, startPositionSec: Float, mimeType: String?, onStarted: () -> Unit) {
+    /** Counts play() and stop() calls: a start whose subtitles took a while yields to a later one. */
+    private val starts = java.util.concurrent.atomic.AtomicInteger()
+
+    private fun startOnMain(
+        start: Int,
+        url: String,
+        startPositionSec: Float,
+        mimeType: String?,
+        subtitles: List<MediaItem.SubtitleConfiguration>,
+        onStarted: () -> Unit
+    ) {
+        if (start != starts.get()) return
         Log.i(TAG, "Playing ${Log.personal(url)} from ${startPositionSec}s")
         // A stop() queued just before this play() has reset the snapshot.
         snapshot = Snapshot(positionSec = startPositionSec.toDouble(), state = AirPlayNative.PLAYBACK_ACTIVE)
@@ -178,7 +204,8 @@ class HlsPlayer(
         // Usually the core's local .m3u8 (HLS), but senders may also pass a plain http(s)
         // media URL, so let ExoPlayer infer the format from the URL, or from the sender's MIME
         // type where it gives one: a DLNA app's HLS or DASH link may have no .m3u8 or .mpd.
-        val item = MediaItem.Builder().setUri(url).setMimeType(adaptiveMimeType(mimeType)).build()
+        val item = MediaItem.Builder().setUri(url).setMimeType(adaptiveMimeType(mimeType))
+            .setSubtitleConfigurations(subtitles).build()
         try {
             exo.setMediaItem(item, (startPositionSec * 1000).toLong().coerceAtLeast(0))
             exo.prepare()
@@ -238,6 +265,7 @@ class HlsPlayer(
     }
 
     fun stop() {
+        starts.incrementAndGet()
         main.post { release() }
     }
 

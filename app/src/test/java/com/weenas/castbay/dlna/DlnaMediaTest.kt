@@ -76,4 +76,35 @@ class DlnaMediaTest {
         assertEquals("application/x-mpegURL", DlnaMedia.parse("""<res protocolInfo="http-get:*:application/x-mpegURL:*">x</res>""", "http://cdn/play?id=1").mimeType)
         assertNull(DlnaMedia.parse(null, "http://cdn/v.mp4").mimeType)
     }
+
+    @Test
+    fun findsSubtitlesTheWaysSendersNameThem() {
+        val samsung = """<item><res protocolInfo="http-get:*:video/x-matroska:*">http://nas/v.mkv</res>""" +
+            """<sec:CaptionInfoEx sec:type="srt">http://nas/v.srt?a=1&amp;b=2</sec:CaptionInfoEx></item>"""
+        assertEquals(listOf(DlnaSubtitle("http://nas/v.srt?a=1&b=2", "srt")), DlnaMedia.parse(samsung, "http://nas/v.mkv").subtitles)
+
+        val res = """<res protocolInfo="http-get:*:video/mp4:*">http://nas/v.mp4</res>""" +
+            """<res protocolInfo="http-get:*:text/vtt:*">http://nas/v.vtt</res>"""
+        val media = DlnaMedia.parse(res, "http://nas/v.mp4")
+        assertEquals(listOf(DlnaSubtitle("http://nas/v.vtt", "vtt")), media.subtitles)
+        // The video's own resource stays the media's MIME type.
+        assertEquals("video/mp4", media.mimeType)
+
+        val pv = """<res protocolInfo="http-get:*:video/mp4:*" pv:subtitleFileType="ASS" pv:subtitleFileUri="http://nas/v.ass">http://nas/v.mp4</res>"""
+        assertEquals(listOf(DlnaSubtitle("http://nas/v.ass", "ass")), DlnaMedia.parse(pv, "http://nas/v.mp4").subtitles)
+
+        // Unknown formats and non-http links are left out; none at all is common.
+        assertTrue(DlnaMedia.parse("""<sec:CaptionInfo sec:type="smi">http://nas/v.smi</sec:CaptionInfo>""", "http://x").subtitles.isEmpty())
+        assertTrue(DlnaMedia.parse("""<sec:CaptionInfo sec:type="srt">file:///v.srt</sec:CaptionInfo>""", "http://x").subtitles.isEmpty())
+        assertTrue(DlnaMedia.parse(null, "http://cdn/v.mp4").subtitles.isEmpty())
+    }
+
+    @Test
+    fun tellsSubtitleFormats() {
+        assertEquals("srt", DlnaMedia.subtitleFormat("application/x-subrip", null))
+        assertEquals("srt", DlnaMedia.subtitleFormat("SRT", null))
+        assertEquals("ass", DlnaMedia.subtitleFormat("text/x-ssa", null))
+        assertEquals("ttml", DlnaMedia.subtitleFormat(null, "http://nas/v.TTML?x=1"))
+        assertNull(DlnaMedia.subtitleFormat("video/mp4", "http://nas/v.mp4"))
+    }
 }
