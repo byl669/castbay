@@ -13,9 +13,9 @@ RepoType: git
 Repo: https://github.com/weenas/castbay.git
 
 Builds:
-  - versionName: 1.6.2
-    versionCode: 117
-    commit: 411f79b70a77a9e4e431042569576e7e57f917d8
+  - versionName: 1.7.0
+    versionCode: 118
+    commit: a83567d1addac6111a84ae2d0e6329424f4e0f41
     subdir: app
     submodules: true
     sudo:
@@ -43,5 +43,5 @@ Builds:
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9]+\.[0-9]+\.[0-9]+$
-CurrentVersion: 1.6.2
-CurrentVersionCode: 117
+CurrentVersion: 1.7.0
+CurrentVersionCode: 118
