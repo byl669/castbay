@@ -10,9 +10,10 @@ fn main() {
         Some("list") => list(),
         Some("bench-capture") => bench_capture(&args[1..]),
         Some("bench-encode") => bench_encode(&args[1..]),
-        Some("send") => send(&args[1..]),
+        Some("cast") => cast(&args[1..]),
+        Some("discover") => discover(&args[1..]),
         _ => {
-            eprintln!("usage: castbay-cast list | send --host H [--port P] ... | bench-capture|bench-encode [--monitor N | --window TITLE] [--seconds S] [--fps F] [--bitrate BPS] [--sw]");
+            eprintln!("usage: castbay-cast list | discover | cast (--host H --port P | --receiver NAME) [--code auto|DIGITS|prompt] [--password PW] [--identity DIR] ... | bench-capture|bench-encode [--monitor N | --window TITLE] [--seconds S] [--fps F] [--bitrate BPS] [--sw]");
             std::process::exit(2);
         }
     }
@@ -232,20 +233,39 @@ fn bench_encode(_: &[String]) {
     eprintln!("encoding is only implemented on Windows so far");
 }
 
-/// Captures, encodes and sends raw Annex B over TCP to the spike receiver (no security: a
-/// measuring tool only). Repeats the last picture when the screen is static.
+/// Looks for receivers on the network.
+fn discover(args: &[String]) {
+    let seconds: u64 = option(args, "--seconds").and_then(|v| v.parse().ok()).unwrap_or(3);
+    match castbay_link::browse(Duration::from_secs(seconds)) {
+        Ok(found) if found.is_empty() => println!("no receivers found"),
+        Ok(found) => {
+            for r in found {
+                println!("{} (id {}): {:?} port {}, verification {:?}{}", r.name, r.id, r.addresses, r.port, r.pair, if r.password { ", password" } else { "" });
+            }
+        }
+        Err(e) => eprintln!("{e}"),
+    }
+}
+
+/// Where the identity and the pinned receivers live.
+fn data_dir(args: &[String]) -> std::path::PathBuf {
+    if let Some(dir) = option(args, "--identity") {
+        return dir.into();
+    }
+    let base = std::env::var_os("APPDATA").or_else(|| std::env::var_os("HOME")).map(std::path::PathBuf::from).unwrap_or_else(|| ".".into());
+    base.join("CastBay Desktop")
+}
+
+/// Captures, encodes and casts to a CastBay receiver over CastBay Link. Repeats the last
+/// picture when the screen is static.
 #[cfg(windows)]
-fn send(args: &[String]) {
+fn cast(args: &[String]) {
     use castbay_encode::ffmpeg::{Codec, FfmpegEncoder};
     use castbay_encode::{bgra_to_nv12, Config};
-    use std::io::Write;
+    use castbay_link::{Event, SendResult};
     use std::sync::{Arc, Mutex};
 
-    let Some(host) = option(args, "--host") else {
-        eprintln!("send needs --host");
-        std::process::exit(2);
-    };
-    let port: u16 = option(args, "--port").and_then(|v| v.parse().ok()).unwrap_or(7600);
+    let runtime = tokio::runtime::Runtime::new().expect("a tokio runtime");
     let target = match option(args, "--window") {
         Some(title) => Target::Window(title.to_string()),
         None => Target::Monitor(option(args, "--monitor").and_then(|v| v.parse().ok()).unwrap_or(0)),
@@ -254,47 +274,122 @@ fn send(args: &[String]) {
     let fps: u32 = option(args, "--fps").and_then(|v| v.parse().ok()).unwrap_or(30);
     let bitrate: u32 = option(args, "--bitrate").and_then(|v| v.parse().ok()).unwrap_or(8_000_000);
     let codec = Codec::parse(option(args, "--encoder").unwrap_or("amf")).expect("encoder: amf, nvenc, qsv or x264");
-    let socket = std::net::TcpStream::connect((host, port)).expect("cannot connect to the receiver");
-    socket.set_nodelay(true).ok();
-    println!("sending {target:?} to {host}:{port} for {seconds} s at {fps} fps, {} kbit/s, {codec:?}", bitrate / 1000);
+
+    // Which receiver: by address, or found by name.
+    let (addr, receiver_id) = match (option(args, "--host"), option(args, "--receiver")) {
+        (Some(host), _) => {
+            let port: u16 = option(args, "--port").and_then(|v| v.parse().ok()).expect("--host needs --port");
+            (std::net::SocketAddr::new(host.parse().expect("an IP address"), port), option(args, "--id").map(str::to_string))
+        }
+        (None, Some(name)) => {
+            let found = castbay_link::browse(Duration::from_secs(4)).expect("discovery");
+            let r = found.into_iter().find(|r| r.name.contains(name)).unwrap_or_else(|| {
+                eprintln!("no receiver named like \"{name}\" found");
+                std::process::exit(1);
+            });
+            let ip = r.addresses.iter().find(|a| a.is_ipv4()).or(r.addresses.first()).copied().expect("an address");
+            println!("found {} at {ip}:{}", r.name, r.port);
+            (std::net::SocketAddr::new(ip, r.port), Some(r.id))
+        }
+        _ => {
+            eprintln!("cast needs --host H --port P, or --receiver NAME");
+            std::process::exit(2);
+        }
+    };
+
+    let dir = data_dir(args);
+    let identity = castbay_link::Identity::load_or_create(&dir).expect("identity");
+    let mut pins = castbay_link::Pins::load(&dir);
+
+    // The first picture fixes the size, so the offer waits for it.
+    let first = Arc::new(Mutex::new(None::<(u32, u32)>));
+    {
+        let first = first.clone();
+        let probe_target = target.clone();
+        std::thread::spawn(move || {
+            let _ = castbay_capture::windows::run(&probe_target, move |frame| {
+                *first.lock().unwrap() = Some((frame.width & !1, frame.height & !1));
+                false
+            });
+        });
+    }
+    let (width, height) = loop {
+        if let Some(size) = *first.lock().unwrap() {
+            break size;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+
+    let config = castbay_link::Config {
+        name: option(args, "--name").map(str::to_string).unwrap_or_else(|| std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Computer".into())),
+        password: option(args, "--password").map(str::to_string),
+        width,
+        height,
+        fps,
+        bitrate_bps: bitrate,
+        source: if matches!(target, Target::Window(_)) { "window" } else { "screen" }.into(),
+    };
+    let code_option = option(args, "--code").map(str::to_string);
+    let mut code = move |expected: &str| -> Option<String> {
+        match code_option.as_deref() {
+            Some("auto") => Some(expected.to_string()),
+            Some(digits) if digits != "prompt" => Some(digits.to_string()),
+            _ => {
+                eprint!("The TV shows a code. Type it: ");
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line).ok()?;
+                Some(line.trim().to_string())
+            }
+        }
+    };
+    let session = runtime.block_on(castbay_link::connect(addr, &identity, &mut pins, receiver_id.as_deref(), &config, &mut code));
+    let session = match session {
+        Ok(session) => session,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    println!("casting {target:?} ({width}x{height}) to {} for {seconds} s at {fps} fps, {} kbit/s, {codec:?}", session.receiver_name, bitrate / 1000);
 
     struct State {
         encoder: Option<FfmpegEncoder>,
         nv12: Vec<u8>,
         have_picture: bool,
         last: Instant,
-        socket: std::net::TcpStream,
-        /// When each queued picture was captured, in the order they went into the encoder.
         captured: std::collections::VecDeque<Instant>,
         lags_ms: Vec<f64>,
         sent: u64,
+        dropped: u64,
         repeats: u64,
         bytes: u64,
         failed: bool,
-        size: (usize, usize),
+        ended: Option<String>,
+        last_stats: Option<(i64, u64, f64)>,
     }
     let started = Instant::now();
     let interval = Duration::from_micros(1_000_000 / fps as u64);
+    let session_ref = Arc::new(Mutex::new(Some(session)));
     let state = Arc::new(Mutex::new(State {
         encoder: None,
-        nv12: Vec::new(),
+        nv12: vec![0; (width * height * 3 / 2) as usize],
         have_picture: false,
         last: started,
-        socket,
         captured: Default::default(),
         lags_ms: Vec::new(),
         sent: 0,
+        dropped: 0,
         repeats: 0,
         bytes: 0,
         failed: false,
-        size: (0, 0),
+        ended: None,
+        last_stats: None,
     }));
 
-    // Pushes the current NV12 picture into the encoder and sends whatever came out.
-    fn push(st: &mut State, captured: Instant, started: Instant, fps: u32, bitrate: u32, codec: Codec, repeat: bool) {
+    // Pushes the current picture into the encoder and sends what came out.
+    fn push(st: &mut State, link: &castbay_link::Session, captured: Instant, started: Instant, config: &Config, codec: Codec, repeat: bool) {
         if st.encoder.is_none() {
-            let config = Config { width: st.size.0 as u32, height: st.size.1 as u32, fps, bitrate_bps: bitrate, gop: fps * 2 };
-            match FfmpegEncoder::new(&config, codec) {
+            match FfmpegEncoder::new(config, codec) {
                 Ok(e) => st.encoder = Some(e),
                 Err(e) => {
                     eprintln!("{e}");
@@ -319,11 +414,11 @@ fn send(args: &[String]) {
                         st.lags_ms.push(at.elapsed().as_secs_f64() * 1000.0);
                     }
                     st.bytes += unit.data.len() as u64;
-                    if st.socket.write_all(&unit.data).is_err() {
-                        st.failed = true;
-                        return;
+                    match link.send_video(unit.pts_us as u64, unit.key, &unit.data) {
+                        SendResult::Sent => st.sent += 1,
+                        SendResult::Dropped => st.dropped += 1,
+                        SendResult::Closed => st.failed = true,
                     }
-                    st.sent += 1;
                 }
             }
             Err(e) => {
@@ -332,56 +427,84 @@ fn send(args: &[String]) {
             }
         }
     }
+    let encoder_config = Config { width, height, fps, bitrate_bps: bitrate, gop: fps * 2 };
 
     // Static screens deliver few pictures: send the last one again so the stream stays alive.
     let repeater = {
-        let state = state.clone();
+        let (state, session_ref, config) = (state.clone(), session_ref.clone(), encoder_config.clone());
         std::thread::spawn(move || loop {
-            std::thread::sleep(interval / 2);
+            std::thread::sleep(interval / 4);
             let mut st = state.lock().unwrap();
-            if st.failed || started.elapsed() > Duration::from_secs(seconds) + Duration::from_secs(1) {
+            if st.failed || st.ended.is_some() || started.elapsed() > Duration::from_secs(seconds) + Duration::from_secs(1) {
                 return;
             }
-            if st.have_picture && st.last.elapsed() > interval * 3 / 2 {
-                push(&mut st, Instant::now(), started, fps, bitrate, codec, true);
+            if st.have_picture && st.last.elapsed() >= interval {
+                if let Some(link) = session_ref.lock().unwrap().as_ref() {
+                    push(&mut st, link, Instant::now(), started, &config, codec, true);
+                }
             }
         })
     };
 
+    // Capture ends only when a picture arrives: a locked or switched-off screen delivers none.
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(seconds + 4));
+        eprintln!("no pictures arrived at the end (is the screen locked?); giving up");
+        std::process::exit(3);
+    });
     let shared = state.clone();
+    let shared_session = session_ref.clone();
     let limit = Duration::from_secs(seconds);
     let result = castbay_capture::windows::run(&target, move |frame| {
         let mut st = shared.lock().unwrap();
-        if st.failed {
+        if let Some(link) = shared_session.lock().unwrap().as_mut() {
+            while let Some(event) = link.next_event() {
+                match event {
+                    Event::Closed(reason) => st.ended = Some(reason),
+                    Event::Stats { decode_ms, dropped, fps } => st.last_stats = Some((decode_ms, dropped, fps)),
+                    Event::KeyFrameRequested => {}
+                }
+            }
+        }
+        if st.failed || st.ended.is_some() {
             return false;
         }
         if st.last.elapsed() + interval / 4 >= interval || !st.have_picture {
             let (w, h) = ((frame.width & !1) as usize, (frame.height & !1) as usize);
-            if st.size != (w, h) {
-                st.size = (w, h);
-                st.nv12 = vec![0; w * h * 3 / 2];
+            if (w as u32, h as u32) == (width, height) {
+                let mut nv12 = std::mem::take(&mut st.nv12);
+                bgra_to_nv12(frame.data, frame.stride, w, h, &mut nv12);
+                st.nv12 = nv12;
+                st.have_picture = true;
+                if let Some(link) = shared_session.lock().unwrap().as_ref() {
+                    push(&mut st, link, Instant::now(), started, &encoder_config, codec, false);
+                }
             }
-            let mut nv12 = std::mem::take(&mut st.nv12);
-            bgra_to_nv12(frame.data, frame.stride, w, h, &mut nv12);
-            st.nv12 = nv12;
-            st.have_picture = true;
-            push(&mut st, Instant::now(), started, fps, bitrate, codec, false);
         }
         frame.timestamp < limit && !st.failed
     });
     let _ = repeater.join();
+    if let Some(link) = session_ref.lock().unwrap().take() {
+        runtime.block_on(link.close());
+    }
     let mut st = state.lock().unwrap();
     let elapsed = started.elapsed().as_secs_f64();
-    println!("ended: {result:?}");
-    println!("units sent: {} ({} repeated pictures), {:.2} Mbit/s, {:.1} fps", st.sent, st.repeats, st.bytes as f64 * 8.0 / elapsed / 1e6, st.sent as f64 / elapsed);
+    println!("ended: {result:?}{}", st.ended.as_ref().map(|r| format!(", receiver: {r}")).unwrap_or_default());
+    println!(
+        "units sent: {} ({} dropped, {} repeated pictures), {:.2} Mbit/s, {:.1} fps",
+        st.sent, st.dropped, st.repeats, st.bytes as f64 * 8.0 / elapsed / 1e6, st.sent as f64 / elapsed
+    );
+    if let Some((decode_ms, dropped, fps)) = st.last_stats {
+        println!("receiver reports: decode {decode_ms} ms, {dropped} dropped, {fps:.1} fps");
+    }
     st.lags_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
     if !st.lags_ms.is_empty() {
         let at = |q: f64| st.lags_ms[((st.lags_ms.len() - 1) as f64 * q) as usize];
-        println!("captured to ready to send: median {:.0} ms, 95th {:.0} ms, worst {:.0} ms (includes about one frame of waiting for the next delimiter)", at(0.5), at(0.95), at(1.0));
+        println!("captured to ready to send: median {:.0} ms, 95th {:.0} ms, worst {:.0} ms", at(0.5), at(0.95), at(1.0));
     }
 }
 
 #[cfg(not(windows))]
-fn send(_: &[String]) {
-    eprintln!("sending is only implemented on Windows so far");
+fn cast(_: &[String]) {
+    eprintln!("casting is only implemented on Windows so far");
 }

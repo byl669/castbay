@@ -86,6 +86,26 @@ sender (134 against 101 ms). About 115 to 120 ms of the total is outside the sen
 capture to send path: waiting for the picture interval after a capture, the network, 14 ms
 in the receiver's decoder, the TV panel, and the cameras.
 
+## Casting over CastBay Link (`castbay-cast cast`, 12 s runs, moving content, 2026-10-25)
+
+The Rust sender (`core/link`) discovers the receiver by mDNS, pairs, and sends over TLS to the
+production receiver mode (Android PR #228). Same laptop and encoders as above; the
+"captured to ready to send" delay is measured as before, the receiver's figures come from its
+once-a-second `stats` message.
+
+| Receiver | Encoder | Rate | Median / 95th (ms) | Receiver decode | Receiver fps | Dropped |
+| --- | --- | --- | --- | --- | --- | --- |
+| Sony TV (Android 12) | AMD `h264_amf` | 30 fps | 134 / 136 | 14 ms | 28.6 sent | 0 |
+| Sony TV | AMD `h264_amf` | 60 fps | 70 / 79 | 14 ms | 55.2 | 0 |
+| Sony TV | x264 ultrafast | 60 fps | 51 / 59 | 13 ms | 55.2 | 0 |
+| Google TV Streamer (Android 14) | AMD `h264_amf` | 30 fps | 134 / 141 | 8 ms | 29.9 | 0 |
+| Android 6 emulator (software decoder, over an SSH tunnel) | x264 | 30 fps | not recorded | 84 ms | 29.9 | 0 |
+
+Pairing worked on the first connection (the test sender types the code the TV should show)
+and every later one reconnected without it. The sender's frame queue never overflowed (0
+dropped). Wall-clock end to end over Link has not been measured with the phone-video method
+yet.
+
 ## Not measured yet
 
 AirPlay mirroring on the same TV (a fair comparison); NVIDIA and Intel encoders; 4K; a

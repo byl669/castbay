@@ -4,8 +4,9 @@ Casts a computer's screen or a single window to CastBay receivers (the Android a
 repository). Windows first; Linux and macOS later (a Mac already mirrors to CastBay through
 AirPlay, so it has the lowest priority).
 
-Status: Phase 1. `core/` builds on Windows (`castbay-cast` can capture, encode and send to a
-spike receiver); there is no app or secure protocol yet.
+Status: Phase 2. `core/` builds on Windows: `castbay-cast` finds receivers (`discover`), pairs,
+captures, encodes and casts over CastBay Link (`cast`). The receiver side is in the Android app
+(`service/desktop/`). There is no desktop app (UI) yet.
 
 - [docs/design.md](docs/design.md): decisions, architecture, phases, risks
 - [docs/protocol.md](docs/protocol.md): the CastBay Link protocol (draft)
