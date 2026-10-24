@@ -92,19 +92,21 @@ Every control message has a `t` field. v1 messages:
 
 | `t` | From | Fields | Meaning |
 | --- | --- | --- | --- |
-| `hello` | both | `v`, `name`, `id`, `app` (name and version), `os` | first message from each side |
+| `hello` | both | `v`, `name`, `id`, `app` (name and version), `os`; the sender adds `password` when the receiver announced `pw` | first message from each side |
+| `pair_required` | receiver | none | a code is needed: the TV shows it, the sender asks its user and answers with `pair` |
 | `pair` | sender | `sas` | the code the user entered |
 | `pair_result` | receiver | `ok`, `reason` | `reason`: `wrong_code`, `locked`, `expired`, `denied` |
+| `ready` | receiver | none | the sender may cast (admitted, paired if needed); the sender then sends `offer` |
 | `offer` | sender | `codec` (`h264`), `width`, `height`, `fps`, `bitrate`, `source` (`screen` or `window`) | what will be sent; sent again when the size changes |
 | `accept` | receiver | none | start sending |
-| `reject` | receiver | `reason` | `busy`, `blocked`, `denied`, `unsupported`, `disabled` |
+| `reject` | receiver | `reason` | `busy`, `blocked`, `approval_needed` (asked on the TV: connect again once allowed), `locked` (pairing paused), `wrong_password`, `unsupported` |
 | `keyframe` | receiver | none | send an IDR now |
 | `stats` | receiver | `decode_ms`, `dropped`, `fps` | once a second; the sender may lower the bitrate |
 | `pause` and `resume` | sender | none | the source is not changing, or is hidden, on purpose |
 | `bye` | both | `reason` | orderly end; stopping from the TV sends `reason: "stopped_by_receiver"` |
 
-Order: TLS, `hello` both ways, `pair` and `pair_result` if pairing, `offer`, `accept`, then
-`video`. Until `accept` the receiver ignores `video`. Either side may close the TCP
+Order: TLS, `hello` both ways, then from the receiver `reject`, or `pair_required` (answered by
+`pair`, then `pair_result`), and finally `ready`; then the sender's `offer`, `accept`, and `video`. Until `accept` the receiver ignores `video`. Either side may close the TCP
 connection at any time; the receiver treats a closed connection as the end of the session
 and clears the screen.
 
@@ -126,8 +128,12 @@ and clears the screen.
 ## 8. Security notes
 
 - Everything after the handshake is encrypted and authenticated by TLS.
-- Bounded message sizes, a handshake timeout of 10 seconds, one unauthenticated connection
-  at a time, and no allocation driven by a length field before it is checked.
+- Bounded message sizes (8 MiB, 64 KiB for control messages), JSON nested at most 8 deep (the
+  platform's parser recurses), a handshake timeout of 10 seconds, at most 8 connections open
+  at once, and no allocation driven by a length field before it is checked. A stranger's
+  connection, however malformed, can only end its own session.
+- The TLS handshake runs on the session's thread: a peer that sends no certificate or speaks
+  plain TCP must not be able to stop the receiver from accepting others.
 - No secrets in logs: certificates' private keys never leave the device; fingerprints and
   names may be logged, frames and SAS values may not.
 - The `fp` TXT value lets a sender notice a receiver whose identity changed.

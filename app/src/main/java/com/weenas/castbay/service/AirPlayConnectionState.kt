@@ -31,6 +31,8 @@ data class StreamInfo(
     val isAudioOnly: Boolean = false,
     /** Cast over DLNA (video, or music with [isAudioOnly]) rather than AirPlay. */
     val isDlna: Boolean = false,
+    /** A computer casting with CastBay Desktop (CastBay Link), as mirroring. */
+    val isDesktop: Boolean = false,
     /**
      * Who is casting: the AirPlay sender's name ("eason的iPhone"), or for DLNA the casting app's
      * id from [com.weenas.castbay.dlna.DlnaSender] ("iqiyi"); empty when unknown.

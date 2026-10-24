@@ -156,6 +156,9 @@ private fun ColumnScope.ConnectionPage(settings: ReceiverSettings, viewModel: Ai
     }
     Text(stringResource(R.string.setting_append_tv_name_note, settings.advertisedName), color = Color.Gray, fontSize = 14.sp)
     CardDivider()
+    SwitchSetting(stringResource(R.string.setting_desktop), settings.desktopEnabled) { enabled ->
+        viewModel.updateSettings { it.copy(desktopEnabled = enabled) }
+    }
     SwitchSetting(stringResource(R.string.setting_dlna), settings.dlnaEnabled) { enabled ->
         viewModel.updateSettings { it.copy(dlnaEnabled = enabled) }
     }

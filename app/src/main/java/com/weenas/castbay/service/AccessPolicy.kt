@@ -39,6 +39,19 @@ object AccessPolicy {
     /** DLNA senders can't enter a PIN or password: with any verification, the TV asks, once. */
     fun dlnaNeedsApproval(settings: ReceiverSettings) = settings.access != ReceiverSettings.ACCESS_OPEN
 
+    /** CastBay Desktop asks on the TV in Confirm mode, like AirPlay; PIN and Password need its pairing code ([desktopNeedsCode]). */
+    fun desktopNeedsApproval(settings: ReceiverSettings) = settings.access == ReceiverSettings.ACCESS_CONFIRM
+
+    /**
+     * A desktop sender pairs by a code the TV shows (derived from both certificates), once,
+     * with PIN or Password verification; Open and Confirm need none.
+     */
+    fun desktopNeedsCode(settings: ReceiverSettings) =
+        settings.access == ReceiverSettings.ACCESS_PIN || settings.access == ReceiverSettings.ACCESS_PASSWORD
+
+    /** A desktop sender is known by the fingerprint of its certificate's key (hex, 64 characters). */
+    fun desktopDeviceId(fingerprintHex: String) = "desktop:${fingerprintHex.take(16)}"
+
     /** A DLNA sender has no device ID of its own; it is known by its network address. */
     fun dlnaDeviceId(address: String) = "dlna:${address.removePrefix("::ffff:")}"
 }
