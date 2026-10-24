@@ -1156,7 +1156,16 @@ fun VideoPlayback(viewModel: AirPlayViewModel, pictureMode: String, awaitingNext
             onRelease = { it.player = null },
             modifier = Modifier.fillMaxSize()
         )
-        if (awaitingNext) {
+        // Shown only if the wait lasts: iQiyi's next episode usually comes within a second.
+        var waitShown by remember { mutableStateOf(false) }
+        LaunchedEffect(awaitingNext) {
+            waitShown = false
+            if (awaitingNext) {
+                kotlinx.coroutines.delay(AWAITING_NEXT_TEXT_DELAY_MS)
+                waitShown = true
+            }
+        }
+        if (awaitingNext && waitShown) {
             // A DLNA video ended: the app casts the next episode in a few seconds.
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(color = Color.White, strokeWidth = 4.dp, modifier = Modifier.size(56.dp))
@@ -1165,7 +1174,7 @@ fun VideoPlayback(viewModel: AirPlayViewModel, pictureMode: String, awaitingNext
                 Spacer(Modifier.height(8.dp))
                 Text(stringResource(R.string.awaiting_next_video_help), fontSize = 18.sp, color = Color(0xB3FFFFFF))
             }
-        } else if (paused) {
+        } else if (paused && !awaitingNext) {
             Box(
                 modifier = Modifier
                     .size(120.dp)
@@ -1180,6 +1189,7 @@ fun VideoPlayback(viewModel: AirPlayViewModel, pictureMode: String, awaitingNext
 }
 
 private const val SEEK_STEP_SEC = 10
+private const val AWAITING_NEXT_TEXT_DELAY_MS = 1000L
 private const val BACK_AGAIN_WINDOW_MS = 3000L
 
 private enum class StreamKind { VIDEO, AUDIO, MIRRORING }
