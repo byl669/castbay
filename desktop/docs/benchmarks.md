@@ -44,8 +44,12 @@ Findings:
   `h264_mf` also fails on it ("format negotiation failed") at 1920x1080 and 1920x1200. The
   Media Foundation code stays in the tree (`encode/src/windows.rs`) for other GPUs and the
   software transform, untested there.
-- `h264_amf` produced one key frame in ten seconds with `-g 60`: it ignores the option as
-  given. Recovery after loss needs key frames on demand; to be solved before Phase 2.
+- `h264_amf` ignores `-g` (one key frame per stream, also with `-forced_idr 1`,
+  `-header_spacing` and another usage). Timed key frames work: `-force_key_frames
+  expr:gte(t,n_forced*2)` gives 5 in ten seconds, and the sender uses it. Key frames on
+  demand (after loss) need the encoder in process, or a restart; not solved yet.
+- `-async_depth 1` (the AMF default is 16, "higher values increase output latency") made no
+  difference to the delay below at 30 fps.
 - At these settings the software encoder is cheap on this 16-thread CPU; it is not a
   stand-in for weaker machines.
 
@@ -55,6 +59,11 @@ Findings:
 | --- | --- | --- | --- |
 | AMD `h264_amf` | 134 ms | 180 to 208 ms | 244 to 284 ms |
 | x264 ultrafast | 101 ms | 118 ms | 168 to 175 ms |
+
+At 60 fps (a second run, moving content kept on top): `h264_amf` median 83 ms (95th 109,
+worst 245) and x264 median 52 ms (95th 83, worst 113); the encoders delivered 48 and 49
+pictures per second of 60, with 110 and 102 repeated pictures, so read these as indicative.
+Doubling the rate takes about 50 ms off the median because every interval-sized wait halves.
 
 This includes about one picture interval of waiting for the next access unit delimiter to
 find the end of a unit, which a sender that gets units straight from an encoder does not

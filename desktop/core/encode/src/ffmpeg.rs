@@ -36,13 +36,18 @@ impl Codec {
         let gop = config.gop.to_string();
         let mut a: Vec<&str> = Vec::new();
         match self {
-            Codec::Amf => a.extend(["-c:v", "h264_amf", "-usage", "ultralowlatency", "-quality", "speed", "-rc", "cbr", "-bf", "0"]),
+            Codec::Amf => a.extend(["-c:v", "h264_amf", "-usage", "ultralowlatency", "-quality", "speed", "-rc", "cbr", "-bf", "0", "-async_depth", "1", "-forced_idr", "1", "-header_spacing", "1"]),
             Codec::Nvenc => a.extend(["-c:v", "h264_nvenc", "-preset", "p1", "-tune", "ll", "-zerolatency", "1", "-rc", "cbr", "-bf", "0"]),
             Codec::Qsv => a.extend(["-c:v", "h264_qsv", "-preset", "veryfast", "-look_ahead", "0", "-bf", "0"]),
             Codec::X264 => a.extend(["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-bf", "0"]),
         }
         let mut out: Vec<String> = a.into_iter().map(String::from).collect();
         out.extend(["-b:v".into(), rate.clone(), "-maxrate".into(), rate, "-g".into(), gop]);
+        if self == Codec::Amf {
+            // h264_amf ignores -g (one key frame per stream); timed key frames work.
+            let seconds = (config.gop as f64 / config.fps as f64).max(1.0);
+            out.extend(["-force_key_frames".into(), format!("expr:gte(t,n_forced*{seconds})")]);
+        }
         out
     }
 }
