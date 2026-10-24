@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core/capture", "core/cli"]
+members = ["core/capture", "core/encode", "core/cli"]
 
 [workspace.package]
 edition = "2021"
