@@ -204,7 +204,8 @@ fun MirrorScreen(viewModel: AirPlayViewModel) {
             val contentModifier = Modifier.focusRequester(contentFocus)
             when (kind) {
                 StreamKind.VIDEO -> VideoPlayback(
-                    viewModel = viewModel, pictureMode = settings.pictureMode, awaitingNext = stream.awaitingNext && !stream.awaitingNextQuietly,
+                    viewModel = viewModel, player = viewModel.videoPlayer, pictureMode = settings.pictureMode,
+                    awaitingNext = stream.awaitingNext && !stream.awaitingNextQuietly,
                     modifier = contentModifier
                 )
                 StreamKind.AUDIO -> {
@@ -1102,8 +1103,15 @@ private fun formatTime(seconds: Double): String {
  * (OK / play-pause) and skip 10 s (left/right, rewind/fast-forward).
  */
 @Composable
-fun VideoPlayback(viewModel: AirPlayViewModel, pictureMode: String, awaitingNext: Boolean = false, modifier: Modifier = Modifier) {
-    val player = viewModel.videoPlayer
+fun VideoPlayback(
+    viewModel: AirPlayViewModel,
+    // A parameter, so a new player (the next DLNA episode, after the last one was released)
+    // recomposes this even when nothing else about the screen changed.
+    player: androidx.media3.common.Player?,
+    pictureMode: String,
+    awaitingNext: Boolean = false,
+    modifier: Modifier = Modifier
+) {
     var paused by remember(player) { mutableStateOf(player?.playWhenReady == false) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
