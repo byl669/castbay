@@ -97,10 +97,13 @@ impl FfmpegEncoder {
                 while i + 3 < pending.len() {
                     if pending[i] == 0 && pending[i + 1] == 0 && pending[i + 2] == 1 && pending[i + 3] & 0x1F == 9 {
                         let cut = if pending[i - 1] == 0 { i - 1 } else { i };
-                        if cut > start && send.send(pending[start..cut].to_vec()).is_err() {
+                        // A unit that is only a delimiter (the encoder wrote its own) belongs to the next one.
+                        if cut > start + 6 && send.send(pending[start..cut].to_vec()).is_err() {
                             return;
                         }
-                        start = cut;
+                        if cut > start + 6 {
+                            start = cut;
+                        }
                         i = cut + 4;
                     } else {
                         i += 1;

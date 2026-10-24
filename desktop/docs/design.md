@@ -90,9 +90,13 @@ X11 route separately. No shared capture API is assumed.
 
 **Encode.** H.264 only (every CastBay receiver has a hardware decoder; HEVC does not). No B
 frames, constant bitrate, an IDR on request and every few seconds, and `num_reorder_frames=0`
-in the stream so decoders do not hold frames back. Primary: Media Foundation H.264 encoder
-transforms, which reach the vendors' hardware encoders (AMD, NVIDIA, Intel) through one API
-and have a low-latency mode. Fallback: a software encoder, **open** (OpenH264 or x264; this
+in the stream so decoders do not hold frames back. Planned primary: Media Foundation H.264
+encoder transforms, which reach the vendors' hardware encoders (AMD, NVIDIA, Intel) through
+one API and have a low-latency mode. **E2 result (docs/benchmarks.md): on the AMD test machine
+the Media Foundation encoder crashes in the driver and fails in FFmpeg too, so it cannot be
+the only route.** Phase 1 uses an FFmpeg child process (AMF, NVENC, Quick Sync and x264 behind
+one set of options) as a stopgap; the final choice (FFmpeg libraries in process, or one layer
+per vendor, with Media Foundation as one of them) waits for measurements on NVIDIA and Intel. Fallback: a software encoder, **open** (OpenH264 or x264; this
 project is GPL-3.0, so either licence fits, but patent coverage differs and must be settled
 in docs before shipping). Not building an encoder. FFmpeg stays a benchmark tool, not a
 dependency, unless Media Foundation proves unusable **(open: experiment E2)**.
@@ -151,7 +155,7 @@ arrives with Phase 2, as its own pull request.
 | ID | Question | Method | Done when |
 | --- | --- | --- | --- |
 | E1 | Do whole-monitor and window capture stay correct across minimise, close, resize, DPI, several monitors, 60 Hz and above? | `core/capture` test app on the Windows laptop, plus a second monitor | Behaviours listed in docs/benchmarks.md |
-| E2 | Media Foundation low-latency H.264 at 1080p30/60 and 4K30: latency, CPU, GPU, bitrate. Software fallback | `core/encode` bench; compare with FFmpeg `h264_mf` and `h264_amf` | Table of measured results, not estimates |
+| E2 | Media Foundation low-latency H.264 at 1080p30/60 and 4K30: latency, CPU, GPU, bitrate. Software fallback | `core/encode` bench; compare with FFmpeg `h264_mf` and `h264_amf` | Table of measured results, not estimates. Partly done on AMD: Media Foundation failed, see benchmarks.md |
 | E3 | End-to-end latency with the final pipeline, and AirPlay mirroring on the same TV | 60 fps or faster phone video of a millisecond clock, 30+ samples | Median and spread per setup |
 | E4 | TLS with a Keystore key on API 23 to 36 | Small test app on the emulator and the Xiaomi TV | Handshake works, or the fallback is chosen |
 | E5 | One-hour stability: memory, handles, drift, Wi-Fi loss and recovery | `castbay-cast` run | No growth, clean reconnect |
