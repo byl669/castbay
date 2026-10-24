@@ -41,5 +41,7 @@ data class StreamInfo(
      * A DLNA video played to its end, and the screen waits a while for the app to cast the
      * next one (an episode) rather than going back to the home screen in between.
      */
-    val awaitingNext: Boolean = false
+    val awaitingNext: Boolean = false,
+    /** Waiting after the app stopped the video (see [awaitingNext]): briefly, and without saying so. */
+    val awaitingNextQuietly: Boolean = false
 )

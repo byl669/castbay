@@ -204,7 +204,7 @@ fun MirrorScreen(viewModel: AirPlayViewModel) {
             val contentModifier = Modifier.focusRequester(contentFocus)
             when (kind) {
                 StreamKind.VIDEO -> VideoPlayback(
-                    viewModel = viewModel, pictureMode = settings.pictureMode, awaitingNext = stream.awaitingNext,
+                    viewModel = viewModel, pictureMode = settings.pictureMode, awaitingNext = stream.awaitingNext && !stream.awaitingNextQuietly,
                     modifier = contentModifier
                 )
                 StreamKind.AUDIO -> {

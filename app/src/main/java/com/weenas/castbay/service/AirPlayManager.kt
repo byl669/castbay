@@ -27,8 +27,8 @@ class AirPlayManager private constructor(private val context: Context) {
         private const val DLNA_PROGRESS_MS = 500L
         /** How long a finished DLNA video's screen waits for the next one ([StreamInfo.awaitingNext]). */
         private const val NEXT_VIDEO_WAIT_MS = 30_000L
-        /** The same after the app stops a video: iQiyi casts the next episode within a second. */
-        private const val STOP_WAIT_MS = 3_000L
+        /** The same, quietly, after the app stops a video: iQiyi casts the next episode within a second. */
+        private const val STOP_WAIT_MS = 2_000L
         private const val DLNA_SKIP_SEC = 10
         private const val MAX_COVER_BYTES = 5 * 1024 * 1024
         /** playback-info for an AirPlay sender whose video DLNA replaced: finished, so it ends its session. */
@@ -312,10 +312,11 @@ class AirPlayManager private constructor(private val context: Context) {
             }
             // iQiyi moves to the next episode (at the closing credits, or when asked) with Stop
             // and, a quarter of a second later, the next video: the screen waits a moment for
-            // it rather than flashing the home screen. The sender sees STOPPED at once.
+            // it, without a word (a Stop usually means stop), rather than flashing the home
+            // screen. The sender sees STOPPED at once.
             hlsPlayer.stop()
             mainHandler.post {
-                if (dlnaOnScreen() && !currentStreamInfo.awaitingNext) awaitNext(STOP_WAIT_MS, "DLNA video stopped by the app")
+                if (dlnaOnScreen() && !currentStreamInfo.awaitingNext) awaitNext(STOP_WAIT_MS, "DLNA video stopped by the app", quietly = true)
             }
         }
 
@@ -963,10 +964,13 @@ class AirPlayManager private constructor(private val context: Context) {
         awaitNext(NEXT_VIDEO_WAIT_MS, "DLNA video ended")
     }
 
-    /** Keeps the finished DLNA video's screen for [timeoutMs], for the app's next video ([StreamInfo.awaitingNext]). Main thread. */
-    private fun awaitNext(timeoutMs: Long, why: String) {
+    /**
+     * Keeps the finished DLNA video's screen for [timeoutMs], for the app's next video
+     * ([StreamInfo.awaitingNext]); [quietly], with nothing on screen. Main thread.
+     */
+    private fun awaitNext(timeoutMs: Long, why: String, quietly: Boolean = false) {
         Log.i(TAG, "$why; waiting ${timeoutMs / 1000} s for the next one")
-        currentStreamInfo = currentStreamInfo.copy(awaitingNext = true, isPlaying = false)
+        currentStreamInfo = currentStreamInfo.copy(awaitingNext = true, awaitingNextQuietly = quietly, isPlaying = false)
         notifyStateChange(currentState)
         mainHandler.removeCallbacks(stopAwaitingNext)
         mainHandler.postDelayed(stopAwaitingNext, timeoutMs)
