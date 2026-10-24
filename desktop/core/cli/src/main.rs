@@ -10,8 +10,9 @@ fn main() {
         Some("list") => list(),
         Some("bench-capture") => bench_capture(&args[1..]),
         Some("bench-encode") => bench_encode(&args[1..]),
+        Some("send") => send(&args[1..]),
         _ => {
-            eprintln!("usage: castbay-cast list | bench-capture|bench-encode [--monitor N | --window TITLE] [--seconds S] [--fps F] [--bitrate BPS] [--sw]");
+            eprintln!("usage: castbay-cast list | send --host H [--port P] ... | bench-capture|bench-encode [--monitor N | --window TITLE] [--seconds S] [--fps F] [--bitrate BPS] [--sw]");
             std::process::exit(2);
         }
     }
@@ -153,7 +154,7 @@ fn bench_encode(args: &[String]) {
         if frame.timestamp < next {
             return frame.timestamp < limit;
         }
-        next = frame.timestamp.max(next) + interval;
+        next = next.max(frame.timestamp.saturating_sub(interval)) + interval;
         let (w, h) = ((frame.width & !1) as usize, (frame.height & !1) as usize);
         if encoder.is_none() {
             let config = Config { width: w as u32, height: h as u32, fps, bitrate_bps: bitrate, gop: fps * 2 };
@@ -229,4 +230,158 @@ fn bench_encode(args: &[String]) {
 #[cfg(not(windows))]
 fn bench_encode(_: &[String]) {
     eprintln!("encoding is only implemented on Windows so far");
+}
+
+/// Captures, encodes and sends raw Annex B over TCP to the spike receiver (no security: a
+/// measuring tool only). Repeats the last picture when the screen is static.
+#[cfg(windows)]
+fn send(args: &[String]) {
+    use castbay_encode::ffmpeg::{Codec, FfmpegEncoder};
+    use castbay_encode::{bgra_to_nv12, Config};
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    let Some(host) = option(args, "--host") else {
+        eprintln!("send needs --host");
+        std::process::exit(2);
+    };
+    let port: u16 = option(args, "--port").and_then(|v| v.parse().ok()).unwrap_or(7600);
+    let target = match option(args, "--window") {
+        Some(title) => Target::Window(title.to_string()),
+        None => Target::Monitor(option(args, "--monitor").and_then(|v| v.parse().ok()).unwrap_or(0)),
+    };
+    let seconds: u64 = option(args, "--seconds").and_then(|v| v.parse().ok()).unwrap_or(30);
+    let fps: u32 = option(args, "--fps").and_then(|v| v.parse().ok()).unwrap_or(30);
+    let bitrate: u32 = option(args, "--bitrate").and_then(|v| v.parse().ok()).unwrap_or(8_000_000);
+    let codec = Codec::parse(option(args, "--encoder").unwrap_or("amf")).expect("encoder: amf, nvenc, qsv or x264");
+    let socket = std::net::TcpStream::connect((host, port)).expect("cannot connect to the receiver");
+    socket.set_nodelay(true).ok();
+    println!("sending {target:?} to {host}:{port} for {seconds} s at {fps} fps, {} kbit/s, {codec:?}", bitrate / 1000);
+
+    struct State {
+        encoder: Option<FfmpegEncoder>,
+        nv12: Vec<u8>,
+        have_picture: bool,
+        last: Instant,
+        socket: std::net::TcpStream,
+        /// When each queued picture was captured, in the order they went into the encoder.
+        captured: std::collections::VecDeque<Instant>,
+        lags_ms: Vec<f64>,
+        sent: u64,
+        repeats: u64,
+        bytes: u64,
+        failed: bool,
+        size: (usize, usize),
+    }
+    let started = Instant::now();
+    let interval = Duration::from_micros(1_000_000 / fps as u64);
+    let state = Arc::new(Mutex::new(State {
+        encoder: None,
+        nv12: Vec::new(),
+        have_picture: false,
+        last: started,
+        socket,
+        captured: Default::default(),
+        lags_ms: Vec::new(),
+        sent: 0,
+        repeats: 0,
+        bytes: 0,
+        failed: false,
+        size: (0, 0),
+    }));
+
+    // Pushes the current NV12 picture into the encoder and sends whatever came out.
+    fn push(st: &mut State, captured: Instant, started: Instant, fps: u32, bitrate: u32, codec: Codec, repeat: bool) {
+        if st.encoder.is_none() {
+            let config = Config { width: st.size.0 as u32, height: st.size.1 as u32, fps, bitrate_bps: bitrate, gop: fps * 2 };
+            match FfmpegEncoder::new(&config, codec) {
+                Ok(e) => st.encoder = Some(e),
+                Err(e) => {
+                    eprintln!("{e}");
+                    st.failed = true;
+                    return;
+                }
+            }
+        }
+        let pts = captured.duration_since(started).as_micros() as i64;
+        let nv12 = std::mem::take(&mut st.nv12);
+        let result = st.encoder.as_mut().unwrap().encode(&nv12, pts);
+        st.nv12 = nv12;
+        st.captured.push_back(captured);
+        st.last = Instant::now();
+        if repeat {
+            st.repeats += 1;
+        }
+        match result {
+            Ok(units) => {
+                for unit in units {
+                    if let Some(at) = st.captured.pop_front() {
+                        st.lags_ms.push(at.elapsed().as_secs_f64() * 1000.0);
+                    }
+                    st.bytes += unit.data.len() as u64;
+                    if st.socket.write_all(&unit.data).is_err() {
+                        st.failed = true;
+                        return;
+                    }
+                    st.sent += 1;
+                }
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                st.failed = true;
+            }
+        }
+    }
+
+    // Static screens deliver few pictures: send the last one again so the stream stays alive.
+    let repeater = {
+        let state = state.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(interval / 2);
+            let mut st = state.lock().unwrap();
+            if st.failed || started.elapsed() > Duration::from_secs(seconds) + Duration::from_secs(1) {
+                return;
+            }
+            if st.have_picture && st.last.elapsed() > interval * 3 / 2 {
+                push(&mut st, Instant::now(), started, fps, bitrate, codec, true);
+            }
+        })
+    };
+
+    let shared = state.clone();
+    let limit = Duration::from_secs(seconds);
+    let result = castbay_capture::windows::run(&target, move |frame| {
+        let mut st = shared.lock().unwrap();
+        if st.failed {
+            return false;
+        }
+        if st.last.elapsed() + interval / 4 >= interval || !st.have_picture {
+            let (w, h) = ((frame.width & !1) as usize, (frame.height & !1) as usize);
+            if st.size != (w, h) {
+                st.size = (w, h);
+                st.nv12 = vec![0; w * h * 3 / 2];
+            }
+            let mut nv12 = std::mem::take(&mut st.nv12);
+            bgra_to_nv12(frame.data, frame.stride, w, h, &mut nv12);
+            st.nv12 = nv12;
+            st.have_picture = true;
+            push(&mut st, Instant::now(), started, fps, bitrate, codec, false);
+        }
+        frame.timestamp < limit && !st.failed
+    });
+    let _ = repeater.join();
+    let mut st = state.lock().unwrap();
+    let elapsed = started.elapsed().as_secs_f64();
+    println!("ended: {result:?}");
+    println!("units sent: {} ({} repeated pictures), {:.2} Mbit/s, {:.1} fps", st.sent, st.repeats, st.bytes as f64 * 8.0 / elapsed / 1e6, st.sent as f64 / elapsed);
+    st.lags_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    if !st.lags_ms.is_empty() {
+        let at = |q: f64| st.lags_ms[((st.lags_ms.len() - 1) as f64 * q) as usize];
+        println!("captured to ready to send: median {:.0} ms, 95th {:.0} ms, worst {:.0} ms (includes about one frame of waiting for the next delimiter)", at(0.5), at(0.95), at(1.0));
+    }
+}
+
+#[cfg(not(windows))]
+fn send(_: &[String]) {
+    eprintln!("sending is only implemented on Windows so far");
 }
