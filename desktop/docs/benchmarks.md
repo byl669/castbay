@@ -121,8 +121,21 @@ process, no pipe, no wait for the next access-unit delimiter). Same laptop and r
 The delay before sending drops from 134 ms to 35 ms for AMF at 30 fps. (The 50 fps with x264
 is the test window's picture rate; the rest were repeated pictures.)
 
+## NVENC (Linux, RTX 4070 Laptop, driver 580, 2026-10-25)
+
+Encoder only: the same C shim and the same FFmpeg n7.1.5 source, built on Linux with
+`h264_nvenc` only, fed 300 synthetic 1080p NV12 pictures at 60 fps, 8 Mbit/s. Windows capture
+and the Windows driver were not involved, so this checks the encoder settings, not the whole path.
+
+- Every picture came out as one access unit straight away (300 of 300; no delay inside the
+  encoder), the first starting with SPS (`00 00 00 01 67`) and key frames carrying SPS and PPS.
+- Asking for a key frame (pictures 100 and 200) gave a key frame for exactly that picture.
+- One encode call took 1.6 ms on average, 3.3 ms at worst.
+
+Still to do: NVENC on Windows with capture, once there is a Windows machine with an NVIDIA GPU.
+
 ## Not measured yet
 
-AirPlay mirroring on the same TV (a fair comparison); NVIDIA and Intel encoders; 4K; a
+AirPlay mirroring on the same TV (a fair comparison); NVIDIA on Windows and Intel encoders; 4K; a
 Wi-Fi receiver; the Xiaomi TV (Android 6); long runs (experiment E5); 60 fps end to end;
 window capture end to end.
