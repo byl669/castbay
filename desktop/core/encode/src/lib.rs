@@ -5,6 +5,9 @@ use std::fmt;
 
 pub mod ffmpeg;
 
+#[cfg(feature = "ffmpeg-lib")]
+pub mod inproc;
+
 #[cfg(windows)]
 pub mod windows;
 
