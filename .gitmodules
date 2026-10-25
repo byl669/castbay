@@ -11,3 +11,19 @@
 	path = third_party/openssl
 	url = https://github.com/openssl/openssl.git
 	shallow = true
+[submodule "desktop/third_party/nv-codec-headers"]
+	path = desktop/third_party/nv-codec-headers
+	url = https://github.com/FFmpeg/nv-codec-headers.git
+	shallow = true
+[submodule "desktop/third_party/AMF"]
+	path = desktop/third_party/AMF
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git
+	shallow = true
+[submodule "desktop/third_party/x264"]
+	path = desktop/third_party/x264
+	url = https://code.videolan.org/videolan/x264.git
+	shallow = true
+[submodule "desktop/third_party/FFmpeg"]
+	path = desktop/third_party/FFmpeg
+	url = https://github.com/FFmpeg/FFmpeg.git
+	shallow = true

@@ -353,7 +353,7 @@ fn cast(args: &[String]) {
     println!("casting {target:?} ({width}x{height}) to {} for {seconds} s at {fps} fps, {} kbit/s, {codec:?}", session.receiver_name, bitrate / 1000);
 
     struct State {
-        encoder: Option<FfmpegEncoder>,
+        encoder: Option<Enc>,
         nv12: Vec<u8>,
         have_picture: bool,
         last: Instant,
@@ -386,10 +386,37 @@ fn cast(args: &[String]) {
         last_stats: None,
     }));
 
+    // The encoder library inside this process when it was built in, else an FFmpeg child process.
+    enum Enc {
+        Process(FfmpegEncoder),
+        #[cfg(feature = "ffmpeg-lib")]
+        Library(castbay_encode::inproc::InProcessEncoder),
+    }
+    impl Enc {
+        fn new(config: &Config, codec: Codec) -> Result<Enc, castbay_encode::Error> {
+            #[cfg(feature = "ffmpeg-lib")]
+            if std::env::var_os("CASTBAY_FFMPEG_PROCESS").is_none() {
+                return castbay_encode::inproc::InProcessEncoder::new(config, codec).map(Enc::Library);
+            }
+            FfmpegEncoder::new(config, codec).map(Enc::Process)
+        }
+        fn encode(&mut self, nv12: &[u8], pts: i64, key: bool) -> Result<Vec<castbay_encode::Encoded>, castbay_encode::Error> {
+            match self {
+                // A child process cannot be told to make a key frame; it makes them on its own timer.
+                Enc::Process(e) => {
+                    let _ = key;
+                    e.encode(nv12, pts)
+                }
+                #[cfg(feature = "ffmpeg-lib")]
+                Enc::Library(e) => e.encode(nv12, pts, key).map(|u| u.into_iter().collect()),
+            }
+        }
+    }
+
     // Pushes the current picture into the encoder and sends what came out.
     fn push(st: &mut State, link: &castbay_link::Session, captured: Instant, started: Instant, config: &Config, codec: Codec, repeat: bool) {
         if st.encoder.is_none() {
-            match FfmpegEncoder::new(config, codec) {
+            match Enc::new(config, codec) {
                 Ok(e) => st.encoder = Some(e),
                 Err(e) => {
                     eprintln!("{e}");
@@ -400,7 +427,7 @@ fn cast(args: &[String]) {
         }
         let pts = captured.duration_since(started).as_micros() as i64;
         let nv12 = std::mem::take(&mut st.nv12);
-        let result = st.encoder.as_mut().unwrap().encode(&nv12, pts);
+        let result = st.encoder.as_mut().unwrap().encode(&nv12, pts, link.wants_key_frame());
         st.nv12 = nv12;
         st.captured.push_back(captured);
         st.last = Instant::now();
