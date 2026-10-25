@@ -106,6 +106,21 @@ and every later one reconnected without it. The sender's frame queue never overf
 dropped). Wall-clock end to end over Link has not been measured with the phone-video method
 yet.
 
+## In-process FFmpeg (`--features ffmpeg-lib`, 10 s runs to the Sony, 2026-10-25)
+
+The encoders now run inside the sender (libavcodec built from the submodules, no child
+process, no pipe, no wait for the next access-unit delimiter). Same laptop and receiver as above.
+
+| Encoder | Rate | Median / 95th (ms) | Receiver decode | Receiver fps | Dropped |
+| --- | --- | --- | --- | --- | --- |
+| AMD `h264_amf`, in-process | 30 fps | 35 / 38 | 14 ms | 29.7 | 0 |
+| AMD `h264_amf`, in-process | 60 fps | 18 / 22 | 14 ms | 59.0 | 0 |
+| x264 ultrafast, in-process | 60 fps | 2 / 3 | 12 ms | 49.7 | 0 |
+| AMD `h264_amf`, FFmpeg process (same build) | 30 fps | 134 / 141 | 12 ms | 30.0 | 0 |
+
+The delay before sending drops from 134 ms to 35 ms for AMF at 30 fps. (The 50 fps with x264
+is the test window's picture rate; the rest were repeated pictures.)
+
 ## Not measured yet
 
 AirPlay mirroring on the same TV (a fair comparison); NVIDIA and Intel encoders; 4K; a
