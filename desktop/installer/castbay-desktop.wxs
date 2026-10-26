@@ -28,7 +28,6 @@
         <Directory Id="INSTALLFOLDER" Name="CastBay Desktop" />
       </Directory>
     </StandardDirectory>
-    <StandardDirectory Id="ProgramMenuFolder" />
 
     <Feature Id="Main" Title="CastBay Desktop" Level="1" AllowAbsent="no">
       <ComponentRef Id="AppFiles" />
@@ -36,18 +35,18 @@
     </Feature>
 
     <DirectoryRef Id="INSTALLFOLDER">
-      <Component Id="AppFiles" Guid="*">
+      <Component Id="AppFiles" Guid="E0113738-E570-4822-B85F-55F2B5517F4E">
         <File Id="AppExe" Name="CastBay Desktop.exe" Source="$(AppExe)" />
         <File Id="LicenseTxt" Name="LICENSE.txt" Source="$(LicenseTxt)" />
         <RegistryValue Root="HKCU" Key="Software\CastBay Desktop" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </DirectoryRef>
-    <DirectoryRef Id="ProgramMenuFolder">
-      <Component Id="StartMenuShortcut" Guid="*">
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="EAF0AB37-ABFD-47BD-A98C-7499D00076B4">
         <Shortcut Id="StartShortcut" Name="CastBay Desktop" Target="[#AppExe]" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
         <RegistryValue Root="HKCU" Key="Software\CastBay Desktop" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
       </Component>
-    </DirectoryRef>
+    </StandardDirectory>
 
     <!-- The program may be running, or sitting in the tray: close it so its file can be replaced. -->
     <CustomAction Id="CloseApp" Directory="TARGETDIR" ExeCommand='taskkill.exe /F /IM "CastBay Desktop.exe"' Return="ignore" Execute="immediate" />
