@@ -1,6 +1,6 @@
 name: Desktop release
 
-# Push a tag like desktop-v0.1.0 to build CastBay Desktop for Windows and publish it as a
+# Push a tag like desktop-v0.1.0 to build CastBay Desktop for Windows and Linux and publish it as a
 # pre-release, with its source (the sources of the libraries it contains are the submodules
 # under desktop/third_party). Run by hand (Actions > Desktop release > Run workflow) it builds
 # the same zip and installer and keeps them as build artifacts only (so does a pull request that
@@ -129,21 +129,106 @@ jobs:
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: CastBay-Desktop-${{ env.VERSION }}
+          name: CastBay-Desktop-${{ env.VERSION }}-windows
           path: |
             dist/*.zip
             dist/*.msi
+            dist/*-source.tar.gz
           retention-days: 14
 
-      - name: Publish the release
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Check the tag matches the app version
         if: startsWith(github.ref, 'refs/tags/desktop-v')
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' desktop/app/Cargo.toml | head -1)"
+          tag="${GITHUB_REF_NAME#desktop-v}"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the app version $version (desktop/app/Cargo.toml and tauri.conf.json)"
+            exit 1
+          fi
+
+      - name: Install the system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev libdbus-1-dev libpipewire-0.3-dev libspa-0.2-dev libclang-dev clang nasm
+
+      - name: Fetch the desktop submodules
+        run: git submodule update --init --depth 1 -- desktop/third_party/FFmpeg desktop/third_party/x264 desktop/third_party/nv-codec-headers
+
+      - name: Note the submodule commits
+        id: libs
+        run: echo "commits=$(git ls-tree HEAD desktop/third_party/ | awk '{print $3}' | tr -d '\n')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffmpeg
+        with:
+          path: desktop/build/ffmpeg
+          key: ffmpeg-linux-${{ hashFiles('desktop/tools/build-ffmpeg-linux.sh') }}-${{ steps.libs.outputs.commits }}
+
+      - name: Build FFmpeg and x264 from the submodules
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        run: desktop/tools/build-ffmpeg-linux.sh
+
+      - name: Build CastBay Desktop
+        working-directory: desktop
+        run: cargo build --release --locked -p castbay-desktop --features ffmpeg-lib
+
+      - name: Package
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/desktop-v*) VERSION="${GITHUB_REF_NAME#desktop-v}" ;;
+            *) VERSION="0.0.0+dev.$(git rev-parse --short HEAD)" ;;
+          esac
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          mkdir -p dist
+          sh desktop/installer/linux/build-deb.sh desktop/target/release/castbay-desktop "$VERSION" dist
+          ls -la dist
+
+      - name: Try the package
+        run: |
+          sudo apt-get install -y --no-install-recommends ./dist/*.deb
+          test -x /usr/bin/castbay-desktop
+          ldd /usr/bin/castbay-desktop | grep "not found" && exit 1 || true
+          sudo apt-get remove -y castbay-desktop
+          test ! -e /usr/bin/castbay-desktop
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CastBay-Desktop-${{ env.VERSION }}-linux
+          path: dist/*.deb
+          retention-days: 14
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      # Creating the release and uploading its files.
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          VERSION="${GITHUB_REF_NAME#desktop-v}"
+          ls -la dist
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             "dist/CastBay-Desktop-$VERSION-windows-x64-zh-CN.msi" \
             "dist/CastBay-Desktop-$VERSION-windows-x64-en-US.msi" \
             "dist/CastBay-Desktop-$VERSION-windows-x64.zip" \
+            "dist/castbay-desktop_${VERSION}_amd64.deb" \
             "dist/CastBay-Desktop-$VERSION-source.tar.gz" \
             --title "CastBay Desktop $VERSION" --prerelease \
-            --notes "CastBay Desktop $VERSION for Windows 10/11 (64-bit). Install with the .msi (zh-CN: Chinese setup screens, en-US: English; no administrator rights needed), or unzip the .zip and run \"CastBay Desktop.exe\" without installing. Casts a screen or window, with sound, to CastBay receivers; turn on Desktop casting in the receiver's settings first. Not code-signed yet: if SmartScreen warns, choose More info, then Run anyway."
+            --notes "CastBay Desktop $VERSION. **Windows 10/11 (64-bit)**: install with the .msi (zh-CN: Chinese setup screens, en-US: English; no administrator rights needed), or unzip the .zip and run \"CastBay Desktop.exe\" without installing. Not code-signed yet: if SmartScreen warns, choose More info, then Run anyway. **Linux (Ubuntu/Debian, 64-bit, Wayland with PipeWire)**: install the .deb with \`sudo apt install ./castbay-desktop_${VERSION}_amd64.deb\`; the system asks which screen or window to share. Casts a screen or window, with sound, to CastBay receivers; turn on Desktop casting in the receiver's settings first."
