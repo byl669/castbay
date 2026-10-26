@@ -9,8 +9,16 @@ $log = Join-Path $env:TEMP 'castbay-msi.log'
 function Check($ok, $what) { if ($ok) { "ok: $what" } else { throw "FAILED: $what" } }
 function Arp { Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'CastBay Desktop' } }
 function Msiexec($args) {
-  $p = Start-Process msiexec.exe -ArgumentList $args -Wait -PassThru
-  if ($p.ExitCode -ne 0) { Get-Content $log -Tail 40 -ErrorAction SilentlyContinue; throw "msiexec $args exited $($p.ExitCode)" }
+  # WaitForExit(ms), not Start-Process -Wait: that also waits for every process the installer started.
+  $p = Start-Process msiexec.exe -ArgumentList $args -PassThru
+  if (-not $p.WaitForExit(240000)) {
+    "msiexec $args did not finish in 4 minutes; its log:"
+    Get-Content $log -Tail 60 -ErrorAction SilentlyContinue
+    Get-Process msiexec -ErrorAction SilentlyContinue | Select-Object Id, StartTime | Format-Table | Out-String
+    $p.Kill()
+    throw "msiexec $args hung"
+  }
+  if ($p.ExitCode -ne 0) { Get-Content $log -Tail 60 -ErrorAction SilentlyContinue; throw "msiexec $args exited $($p.ExitCode)" }
 }
 
 foreach ($round in 1, 2) {
