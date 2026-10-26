@@ -92,12 +92,17 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
     private val registeredTypes = mutableSetOf<String>()
     private var running = false
     private var retries = 0
+    /** NsdManager did not register the services, so [responder] announces them (see [MdnsResponder]). */
+    private var ownActive = false
+    private val responder = MdnsResponder(appContext)
+    private var announced: Triple<String, Int, DiscoveryRecords>? = null
     private var registerAll: (() -> Unit)? = null
     /** NsdManager sometimes never answers when the same names were withdrawn a moment ago: try again. */
     private val watchdog: Runnable = Runnable {
         if (!running || registeredTypes.size == 2) return@Runnable
         if (retries >= MAX_RETRIES) {
             Diagnostics.record("discovery", "Registering did not finish after $retries retries")
+            if (!startOwnResponder("NsdManager did not answer")) noteFailure(AIRPLAY, null)
             return@Runnable
         }
         retries++
@@ -145,6 +150,8 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
 
             val deviceId = deviceId()
             val advertisedPort = protocolPort ?: requireNotNull(listenerSocket).localPort
+            announced = Triple(displayName, advertisedPort, records)
+            ownActive = false
             // Same layout as RPiPlay's dnssd_register_airplay / dnssd_register_raop.
             registerAll = {
                 register(AIRPLAY, displayName, advertisedPort,
@@ -154,10 +161,15 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
                     records.raop)
             }
             registering = AIRPLAY
-            registerAll?.invoke()
             retries = 0
             mainHandler.removeCallbacks(watchdog)
-            mainHandler.postDelayed(watchdog, REGISTER_TIMEOUT_MS)
+            if (com.weenas.castbay.BuildConfig.DEBUG && preferences.getBoolean("force_own_mdns", false)) {
+                // For testing the fallback without a box whose NsdManager is broken.
+                mainHandler.post { startOwnResponder("forced for testing") }
+            } else {
+                registerAll?.invoke()
+                mainHandler.postDelayed(watchdog, REGISTER_TIMEOUT_MS)
+            }
             true
         } catch (error: Exception) {
             Log.e(TAG, "Could not advertise AirPlay discovery", error)
@@ -167,6 +179,29 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
             noteFailure(registering ?: AIRPLAY, null)
             false
         }
+    }
+
+    /** Announces the services without NsdManager. Main thread. True when it is announcing. */
+    private fun startOwnResponder(reason: String): Boolean {
+        if (ownActive) return true
+        val (name, port, records) = announced ?: return false
+        mainHandler.removeCallbacks(watchdog)
+        unregisterAll()
+        val id = deviceId()
+        val services = listOf(
+            MdnsService(AIRPLAY, name, port, linkedMapOf("deviceid" to id) + records.airplay),
+            MdnsService(RAOP, "${id.replace(":", "")}@$name", port, records.raop)
+        )
+        val host = "castbay-" + id.replace(":", "").takeLast(6).lowercase()
+        if (!responder.start(host, services)) return false
+        ownActive = true
+        Diagnostics.record("discovery", "Announcing by itself because: $reason")
+        Log.i(TAG, "Announcing by itself because: $reason")
+        update(AIRPLAY, Registration.Registered(port))
+        update(RAOP, Registration.Registered(port))
+        registeredTypes.addAll(listOf(AIRPLAY, RAOP))
+        onReady?.invoke()
+        return true
     }
 
     private fun unregisterAll() {
@@ -184,6 +219,8 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
     fun stop() {
         running = false
         mainHandler.removeCallbacks(watchdog)
+        responder.stop()
+        ownActive = false
         registerAll = null
         unregisterAll()
         // A failure stays visible; anything else is no longer advertised.
@@ -206,7 +243,7 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
                 mainHandler.post {
-                    if (!running) return@post
+                    if (!running || ownActive) return@post
                     Log.i(TAG, "Registered $type as ${serviceInfo.serviceName} on port $port")
                     registeredTypes.add(type)
                     update(type, Registration.Registered(port))
@@ -216,7 +253,7 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
 
             override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
                 mainHandler.post {
-                    if (!running) return@post
+                    if (!running || ownActive) return@post
                     // An internal error or an old registration still active is often gone a moment
                     // later (seen on a TV box with an old Android, code 0): try again first.
                     if (retries < MAX_RETRIES && (errorCode == NsdManager.FAILURE_INTERNAL_ERROR || errorCode == NsdManager.FAILURE_ALREADY_ACTIVE)) {
@@ -225,6 +262,8 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
                         Diagnostics.record("discovery", "Registering $type failed (NsdManager code $errorCode), will try again")
                         return@post
                     }
+                    // The system will not do it: announce by ourselves, and only if that fails too give up.
+                    if (startOwnResponder("NsdManager failed ($type, code $errorCode)")) return@post
                     val callback = onError
                     stop()
                     noteFailure(type, errorCode)
