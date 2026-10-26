@@ -20,3 +20,8 @@ features = [
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Variant",
 ]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "screencast", "inhibit"] }
+pipewire = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread"] }

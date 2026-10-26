@@ -234,6 +234,7 @@ pub fn run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> O
 
 fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, done: std::sync::mpsc::Sender<Result<Report, Failure>>) -> Result<(), Failure> {
     let Options { addr, receiver_id, name, password, target, fps, bitrate_bps, codec, audio, max_size, data_dir, max_duration } = options;
+    castbay_capture::set_data_dir(&data_dir);
     on_status(Status::Connecting);
     let runtime = tokio::runtime::Runtime::new().map_err(|e| Failure::new("other", e.to_string()))?;
 
@@ -242,7 +243,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
     {
         let (first, target) = (first.clone(), target.clone());
         std::thread::spawn(move || {
-            let _ = castbay_capture::run(&target, move |frame| {
+            let _ = castbay_capture::run(&target, || false, move |frame| {
                 *first.lock().unwrap() = Some((frame.width & !1, frame.height & !1));
                 false
             });
@@ -480,7 +481,8 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
     let result = {
         let (state, session_ref, over) = (state.clone(), session_ref.clone(), over.clone());
         let capture_status = on_status.clone();
-        castbay_capture::run(&target, move |frame| {
+        let stop_when = over.clone();
+        castbay_capture::run(&target, move || stop_when(), move |frame| {
             if over() {
                 return false;
             }

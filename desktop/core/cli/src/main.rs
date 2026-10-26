@@ -1,8 +1,6 @@
 //! `castbay-cast`: a command-line sender used for tests and benchmarks.
 
-use std::time::Duration;
-#[cfg(windows)]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use castbay_capture::Target;
 
@@ -13,9 +11,10 @@ fn main() {
         Some("bench-capture") => bench_capture(&args[1..]),
         Some("bench-encode") => bench_encode(&args[1..]),
         Some("cast") => cast(&args[1..]),
+        Some("capture-test") => capture_test(&args[1..]),
         Some("discover") => discover(&args[1..]),
         _ => {
-            eprintln!("usage: castbay-cast list | discover | cast (--host H --port P | --receiver NAME) [--code auto|DIGITS|prompt] [--password PW] [--identity DIR] ... | bench-capture|bench-encode [--monitor N | --window TITLE] [--seconds S] [--fps F] [--bitrate BPS] [--sw]");
+            eprintln!("usage: castbay-cast list | discover | capture-test [--window] [--seconds S] [--png FILE] | cast (--host H --port P | --receiver NAME) [--code auto|DIGITS|prompt] [--password PW] [--identity DIR] ... | bench-capture|bench-encode [--monitor N | --window TITLE] [--seconds S] [--fps F] [--bitrate BPS] [--sw]");
             std::process::exit(2);
         }
     }
@@ -32,6 +31,95 @@ fn list() {
         }
         (Err(error), _) | (_, Err(error)) => eprintln!("{error}"),
     }
+}
+
+/// Captures for a few seconds and says what arrived (and saves the last picture as a PNG): the
+/// capture alone, without encoding or the network.
+fn capture_test(args: &[String]) {
+    use std::sync::{Arc, Mutex};
+    let target = if args.iter().any(|a| a == "--window") { Target::Window(String::new()) } else { Target::Monitor(0) };
+    let seconds: u64 = option(args, "--seconds").and_then(|v| v.parse().ok()).unwrap_or(5);
+    castbay_capture::set_data_dir(&data_dir(args));
+    let seen = Arc::new(Mutex::new((0u64, 0u32, 0u32, None::<Vec<u8>>)));
+    let collect = seen.clone();
+    let started = Instant::now();
+    let result = castbay_capture::run(
+        &target,
+        || false,
+        move |frame| {
+            let mut s = collect.lock().unwrap();
+            s.0 += 1;
+            if s.0 == 1 {
+                println!("first picture after {:.1} s: {}x{} (stride {})", started.elapsed().as_secs_f64(), frame.width, frame.height, frame.stride);
+            }
+            // Keep a tightly packed copy of the latest picture for the PNG.
+            let mut packed = Vec::with_capacity(frame.width as usize * frame.height as usize * 4);
+            for row in frame.data.chunks(frame.stride).take(frame.height as usize) {
+                packed.extend_from_slice(&row[..frame.width as usize * 4]);
+            }
+            s.1 = frame.width;
+            s.2 = frame.height;
+            s.3 = Some(packed);
+            frame.timestamp < Duration::from_secs(seconds)
+        },
+    );
+    let s = seen.lock().unwrap();
+    println!("ended: {result:?}; {} pictures in {:.1} s ({:.1} per second)", s.0, started.elapsed().as_secs_f64(), s.0 as f64 / seconds as f64);
+    if let (Some(path), Some(bgra)) = (option(args, "--png"), &s.3) {
+        write_png(path, s.1, s.2, bgra).expect("could not write the PNG");
+        println!("saved {path}");
+    }
+}
+
+/// A PNG with no compression (stored blocks): enough to look at a picture, with no dependency.
+fn write_png(path: &str, width: u32, height: u32, bgra: &[u8]) -> std::io::Result<()> {
+    fn crc32(data: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for &b in data {
+            crc ^= b as u32;
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            }
+        }
+        !crc
+    }
+    fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        let mut body = kind.to_vec();
+        body.extend_from_slice(data);
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&crc32(&body).to_be_bytes());
+    }
+    let mut raw = Vec::with_capacity((width as usize * 3 + 1) * height as usize);
+    for row in bgra.chunks(width as usize * 4).take(height as usize) {
+        raw.push(0);
+        for px in row.chunks_exact(4) {
+            raw.extend_from_slice(&[px[2], px[1], px[0]]);
+        }
+    }
+    let mut zlib = vec![0x78, 0x01];
+    let mut chunks = raw.chunks(65535).peekable();
+    while let Some(block) = chunks.next() {
+        zlib.push(chunks.peek().is_none() as u8);
+        zlib.extend_from_slice(&(block.len() as u16).to_le_bytes());
+        zlib.extend_from_slice(&(!(block.len() as u16)).to_le_bytes());
+        zlib.extend_from_slice(block);
+    }
+    let (mut a, mut b) = (1u32, 0u32);
+    for &byte in &raw {
+        a = (a + byte as u32) % 65521;
+        b = (b + a) % 65521;
+    }
+    zlib.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut header = Vec::new();
+    header.extend_from_slice(&width.to_be_bytes());
+    header.extend_from_slice(&height.to_be_bytes());
+    header.extend_from_slice(&[8, 2, 0, 0, 0]);
+    chunk(&mut png, b"IHDR", &header);
+    chunk(&mut png, b"IDAT", &zlib);
+    chunk(&mut png, b"IEND", &[]);
+    std::fs::write(path, png)
 }
 
 fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {

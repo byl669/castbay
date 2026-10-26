@@ -64,22 +64,37 @@ pub enum Ended {
     SourceClosed,
 }
 
-/// Captures `target` until `on_frame` returns false or the source closes; frames are only valid
-/// inside the callback. The same call on every platform.
-pub fn run(target: &Target, on_frame: impl FnMut(Frame<'_>) -> bool + Send + 'static) -> Result<Ended, Error> {
+/// Captures `target` until `on_frame` returns false, `stop` says so, or the source closes; frames
+/// are only valid inside the callback. The same call on every platform. (Windows looks at `stop`
+/// when a picture arrives; Linux also while none does, which it must: the screen share the
+/// system shows stays open as long as this runs.)
+pub fn run(
+    target: &Target,
+    stop: impl Fn() -> bool + Send + 'static,
+    #[allow(unused_mut)] mut on_frame: impl FnMut(Frame<'_>) -> bool + Send + 'static,
+) -> Result<Ended, Error> {
     #[cfg(windows)]
     {
-        windows::run(target, on_frame)
+        windows::run(target, move |frame| !stop() && on_frame(frame))
     }
     #[cfg(target_os = "linux")]
     {
-        linux::run(target, on_frame)
+        linux::run(target, stop, on_frame)
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {
-        let _ = (target, on_frame);
+        let _ = (target, stop, &mut on_frame);
         Err(Error::Platform("screen capture is not implemented on this system".into()))
     }
+}
+
+/// Where the capture may keep what it remembers between runs (on Linux the token with which the
+/// system lets the same screen be shared again without asking). Nothing on Windows.
+pub fn set_data_dir(dir: &std::path::Path) {
+    #[cfg(target_os = "linux")]
+    linux::set_data_dir(dir);
+    #[cfg(not(target_os = "linux"))]
+    let _ = dir;
 }
 
 /// Names of the monitors, for a picker (empty where the system does its own picking).
