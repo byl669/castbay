@@ -14,7 +14,7 @@ const zh = {
   reconnecting: "连接中断，正在重连…", reconnected: "已重新连接",
   ended: "投屏已结束", ended_stopped_by_receiver: "接收端结束了投屏", ended_replaced: "接收端被另一台设备占用了",
   ended_receiver_stopped: "接收端已停止接收", ended_stopped: "投屏已停止",
-  failed: "无法投屏：{0}", logs: "打开日志文件夹", forget: "忘记这个接收端",
+  update_open: "下载", update_text: "有新版本 {0} 可用", failed: "无法投屏：{0}", logs: "打开日志文件夹", forget: "忘记这个接收端",
   f_busy: "接收端正在被另一台设备使用。", f_blocked: "接收端屏蔽了这台电脑。请在接收端的“已知设备”里解除屏蔽。",
   f_approval_needed: "接收端需要有人在它的屏幕上点“允许”。请确认后重试。", f_locked: "配对尝试次数过多，接收端暂时锁定了配对，请一分钟后重试。",
   f_wrong_password: "接收端密码不对。", f_unsupported: "接收端不支持这次投屏的格式。", f_wrong_code: "配对码不对，请重试。",
@@ -28,7 +28,7 @@ const en = {
   ended_stopped_by_receiver: "The receiver ended the cast", ended_replaced: "Another device took over the receiver",
   ended_receiver_stopped: "The receiver stopped receiving", ended_stopped: "Casting stopped",
   connecting: "Connecting…", needs_code: "Pairing needed", reconnecting: "Connection lost, reconnecting…", reconnected: "Reconnected",
-  ended: "Casting ended", failed: "Could not cast: {0}", logs: "Open log folder", forget: "Forget this receiver",
+  update_open: "Download", update_text: "Version {0} is available", ended: "Casting ended", failed: "Could not cast: {0}", logs: "Open log folder", forget: "Forget this receiver",
   f_busy: "The receiver is being used by another device.", f_blocked: "The receiver blocks this computer. Unblock it in the receiver's known devices.",
   f_approval_needed: "Someone has to tap Allow on the receiver's screen. Confirm there and try again.", f_locked: "Too many pairing attempts: the receiver paused pairing. Try again in a minute.",
   f_wrong_password: "Wrong receiver password.", f_unsupported: "The receiver does not support this kind of cast.", f_wrong_code: "Wrong pairing code, try again.",
@@ -212,3 +212,27 @@ $("stop").addEventListener("click", () => invoke("stop_cast"));
 refreshSources();
 refreshReceivers();
 setInterval(() => { if (!casting) refreshReceivers(); }, 15000);
+
+// Tells the person when a newer release exists. A development build (0.0.0) and a network that
+// cannot reach GitHub stay quiet.
+function newer(a, b) {
+  const num = (v) => v.split("-")[0].split(".").map((n) => parseInt(n, 10) || 0);
+  const [x, y] = [num(a), num(b)];
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+}
+
+(async () => {
+  try {
+    const current = await window.__TAURI__.app.getVersion();
+    if (current === "0.0.0") return;
+    const response = await fetch("https://api.github.com/repos/weenas/castbay/releases?per_page=30");
+    if (!response.ok) return;
+    const releases = (await response.json()).filter((r) => !r.draft && r.tag_name.startsWith("desktop-v"));
+    const latest = releases.map((r) => ({ version: r.tag_name.slice("desktop-v".length), url: r.html_url })).sort((p, q) => (newer(p.version, q.version) ? -1 : 1))[0];
+    if (!latest || !newer(latest.version, current)) return;
+    $("update-text").textContent = t("update_text", latest.version);
+    $("update-open").onclick = () => invoke("open_release", { url: latest.url }).catch(() => {});
+    $("update").hidden = false;
+  } catch {}
+})();
