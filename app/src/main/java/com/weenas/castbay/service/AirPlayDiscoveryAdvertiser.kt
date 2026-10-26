@@ -217,6 +217,14 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
             override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
                 mainHandler.post {
                     if (!running) return@post
+                    // An internal error or an old registration still active is often gone a moment
+                    // later (seen on a TV box with an old Android, code 0): try again first.
+                    if (retries < MAX_RETRIES && (errorCode == NsdManager.FAILURE_INTERNAL_ERROR || errorCode == NsdManager.FAILURE_ALREADY_ACTIVE)) {
+                        mainHandler.removeCallbacks(watchdog)
+                        mainHandler.postDelayed(watchdog, RETRY_DELAY_MS)
+                        Diagnostics.record("discovery", "Registering $type failed (NsdManager code $errorCode), will try again")
+                        return@post
+                    }
                     val callback = onError
                     stop()
                     noteFailure(type, errorCode)
@@ -275,5 +283,6 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
         const val RAOP = "_raop._tcp"
         private const val REGISTER_TIMEOUT_MS = 8_000L
         private const val MAX_RETRIES = 2
+        private const val RETRY_DELAY_MS = 1_500L
     }
 }
