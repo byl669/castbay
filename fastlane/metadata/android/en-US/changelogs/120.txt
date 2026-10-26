@@ -1,0 +1,1 @@
+• Fixed music casting stopping when the phone moves between mesh Wi-Fi nodes.

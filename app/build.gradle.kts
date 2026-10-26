@@ -39,8 +39,8 @@ android {
         // Changed only for a release. versionName follows semantic versioning: the middle
         // number for new features (1.1.0), the last for fixes only (1.1.1), the first for big
         // changes. versionCode goes up by one with each release.
-        versionCode = 119
-        versionName = "1.8.0"
+        versionCode = 120
+        versionName = "1.8.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Only the ABIs the AirPlay library (airplay/) is built for: other libraries also ship x86
         // and x86_64 code, and an APK carrying those would install on x86 devices and crash there.
