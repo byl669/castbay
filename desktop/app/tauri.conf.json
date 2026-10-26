@@ -12,9 +12,9 @@
       {
         "title": "CastBay Desktop",
         "visible": false,
-        "width": 480,
-        "height": 680,
-        "minWidth": 420,
+        "width": 540,
+        "height": 660,
+        "minWidth": 460,
         "minHeight": 560
       }
     ],

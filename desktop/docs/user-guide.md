@@ -44,16 +44,27 @@ Two ways, same program. / 两种方式，程序是同一个。
 3. 在列表里选接收端，选择屏幕或窗口，点“开始投屏”。
 4. 第一次连接时接收端会显示 6 位配对码，在窗口里输入即可，以后不用再输。
 
-## Settings in the window / 窗口里的选项
+## The window / 窗口
+
+**Home / 主页:** pick a receiver, choose a screen or a window, press **Start casting**. The line above the button shows the quality and sound in use; **Change** opens the settings.
+主页：选接收端，选屏幕或窗口，点“开始投屏”。按钮上方一行显示当前画质和是否带声音，点“更改”进入设置。
+
+**Casting / 投屏中:** shows where it casts to and the size. **Stop casting** ends it. **Details** (decode time, frame rate, dropped pictures, bitrate) is folded away. Closing the window keeps the cast running in the tray.
+投屏中：显示投到哪里、画面大小，“停止投屏”结束投屏；“详细信息”默认收起。关闭窗口，投屏继续在托盘里运行。
+
+**Settings (the sliders icon) / 设置（右上角滑块图标）:**
 
 | | |
 | --- | --- |
-| Quality / 画质 | Balanced 30 fps 8 Mbit/s; Smooth 60 fps 10 Mbit/s; Light 30 fps 4 Mbit/s. 均衡 / 流畅 / 省流 |
-| Bitrate / 码率 | The quality choice is the most it uses: when the connection cannot keep up the bitrate goes down by a third (down to a sixth of it), and it creeps back up after twenty calm seconds; the window shows the current bitrate. 画质选项是上限：网络跟不上时码率会降三成（最低降到上限的六分之一），平静二十秒后慢慢回升，窗口里会显示当前码率 |
-| Encoder / 编码器 | Automatic tries AMD, then NVIDIA, then the CPU (x264). 自动：依次尝试 AMD、NVIDIA、CPU |
+| Quality / 画质 | Light 30 fps 4 Mbit/s; Balanced 30 fps 8 Mbit/s; Smooth 60 fps 10 Mbit/s. The chosen quality is the most that is used: when the connection cannot keep up the bitrate goes down by a third (to a sixth of it at most) and creeps back up after twenty calm seconds. 画质选项是上限：网络跟不上时码率降三成（最低降到上限的六分之一），平静二十秒后慢慢回升 |
 | Send sound too / 同时传声音 | The sound the PC plays is sent too (and still plays on the PC). 电脑播放的声音一起传过去 |
-| Start with Windows / 开机自启 | Starts with Windows and waits in the tray. 随 Windows 启动并在系统托盘待命 |
-| Closing the window / 关闭窗口 | While casting, the cast keeps running in the tray (click its icon to open, or Stop/Quit in its menu); otherwise the program quits. 投屏时关闭窗口，投屏继续在托盘运行（点图标打开，菜单里可停止或退出）；没在投屏则直接退出 |
+| Encoder / 编码器 | Automatic tries AMD, then NVIDIA, then the CPU (x264). 自动：依次尝试 AMD、NVIDIA、CPU |
+| Start with Windows / 开机自动启动 | Starts with Windows and waits in the tray. 随 Windows 启动并在系统托盘待命 |
+| Language / 语言 | Follow the system, Chinese or English (also for the tray menu). 跟随系统、中文或英文（托盘菜单同步） |
+| Paired receivers / 已配对的接收端 | The receivers paired before, with the last time connected; **Forget** removes one (the next cast pairs again). 配对过的接收端和上次连接时间；“忘记”后下次投屏需要重新配对 |
+| About / 关于 | Version, check for updates, open the log folder, licence and source. 版本、检查更新、日志文件夹、许可证与源码 |
+
+Changes apply to the next cast. 修改在下一次投屏时生效。
 
 ## Uninstall / 卸载
 

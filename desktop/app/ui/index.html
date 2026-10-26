@@ -7,102 +7,147 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<main>
-  <header>
-    <h1 data-i18n="title">CastBay Desktop</h1>
-    <p class="sub" data-i18n="subtitle">Cast this PC's screen or a window to a CastBay receiver.</p>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-cast" viewBox="0 0 24 24"><path d="M3 18a3 3 0 0 1 3 3M3 14a7 7 0 0 1 7 7M3 10a11 11 0 0 1 11 11"/><path d="M3 6V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h11M21 18h-1"/><circle cx="16" cy="6" r="2.2"/><circle cx="10" cy="12" r="2.2"/><circle cx="18" cy="18" r="2.2"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M5 9l7 7 7-7"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11A8 8 0 0 0 5.6 6.6L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 13a8 8 0 0 0 14.4 4.4L20 15.5"/><path d="M20 20v-4.5h-4.5"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/></symbol>
+    <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="i-signal" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M12 6H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/><path d="M11 13l9-9M15 4h5v5"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/></symbol>
+  </defs>
+</svg>
+
+<div id="app">
+  <header class="topbar">
+    <button id="back" class="icon-btn" hidden data-aria="back"><svg class="ic"><use href="#i-back"/></svg></button>
+    <h1 id="title"><svg class="ic brand"><use href="#i-cast"/></svg><span id="title-text" data-i18n="app_name"></span></h1>
+    <button id="open-settings" class="icon-btn" data-aria="settings"><svg class="ic"><use href="#i-gear"/></svg></button>
   </header>
 
-  <div id="update" class="update" hidden>
-    <span id="update-text"></span>
-    <button id="update-open" class="link" data-i18n="update_open">Download</button>
-  </div>
-
-  <section id="welcome" class="card" hidden>
-    <h2 data-i18n="w_title">Getting started</h2>
-    <ol>
-      <li data-i18n="w_1">On the TV or tablet, open CastBay and turn on "Desktop casting" in its settings.</li>
-      <li data-i18n="w_2">If Windows asks about the firewall, allow access on private networks. Otherwise receivers cannot be found.</li>
-      <li data-i18n="w_3">Pick the receiver below and start. The first time, the receiver shows a 6-digit code: type it here.</li>
-    </ol>
-    <button id="welcome-ok" class="primary" data-i18n="w_ok">Got it</button>
-  </section>
-
-  <section id="setup">
-    <div class="row head">
-      <h2 data-i18n="receivers">Receivers</h2>
-      <button id="refresh" class="link" data-i18n="refresh">Refresh</button>
+  <main>
+    <div id="notices">
+      <div id="update" class="notice info" hidden><svg class="ic"><use href="#i-info"/></svg><span id="update-text"></span><button id="update-open" class="link" data-i18n="download"></button></div>
+      <div id="error-box" class="notice danger" role="alert" hidden><svg class="ic"><use href="#i-alert"/></svg><span id="error"></span><button id="forget" class="link" hidden data-i18n="forget_receiver"></button></div>
     </div>
-    <ul id="receiver-list" class="list" role="listbox"></ul>
-    <p id="receiver-empty" class="hint" hidden data-i18n="none_found">No receiver found. Open CastBay on the TV or tablet and turn on "Desktop casting" in its settings; both must be on the same network, and the Windows firewall must allow this app on private networks.</p>
-    <label id="password-row" hidden>
-      <span data-i18n="password">Receiver password</span>
-      <input id="password" type="password" autocomplete="off">
-    </label>
 
-    <h2 data-i18n="what">What to cast</h2>
-    <div class="seg" role="radiogroup">
-      <label><input type="radio" name="kind" value="monitor" checked><span data-i18n="screen">A screen</span></label>
-      <label><input type="radio" name="kind" value="window"><span data-i18n="window">A window</span></label>
-    </div>
-    <select id="source" aria-label="Source"></select>
+    <section id="view-home" class="view">
+      <div id="welcome" class="card welcome" hidden>
+        <h2 data-i18n="w_title"></h2>
+        <ol>
+          <li data-i18n="w_1"></li>
+          <li data-i18n="w_2"></li>
+          <li data-i18n="w_3"></li>
+        </ol>
+        <button id="welcome-ok" class="btn secondary" data-i18n="got_it"></button>
+      </div>
 
-    <div class="two">
-      <label>
-        <span data-i18n="quality">Quality</span>
-        <select id="quality">
-          <option value="balanced" data-i18n="q_balanced">Balanced (30 fps, 8 Mbit/s)</option>
-          <option value="smooth" data-i18n="q_smooth">Smooth (60 fps, 10 Mbit/s)</option>
-          <option value="saver" data-i18n="q_saver">Light (30 fps, 4 Mbit/s)</option>
-        </select>
+      <div class="section-head">
+        <h2 data-i18n="receivers"></h2>
+        <button id="refresh" class="icon-btn small" data-aria="refresh"><svg class="ic"><use href="#i-refresh"/></svg></button>
+      </div>
+      <ul id="receiver-list" class="receivers" role="listbox" aria-labelledby="title-text"></ul>
+      <div id="empty" class="empty" hidden>
+        <svg class="ic big"><use href="#i-signal"/></svg>
+        <p class="strong" data-i18n="empty_title"></p>
+        <p class="muted" data-i18n="empty_body"></p>
+        <button id="empty-retry" class="btn secondary" data-i18n="search_again"></button>
+      </div>
+      <label id="password-row" class="field" hidden>
+        <span data-i18n="password"></span>
+        <input id="password" type="password" autocomplete="off">
       </label>
-      <label>
-        <span data-i18n="encoder">Encoder</span>
-        <select id="encoder">
-          <option value="auto" data-i18n="e_auto">Automatic</option>
-          <option value="amf">AMD</option>
-          <option value="nvenc">NVIDIA</option>
-          <option value="x264" data-i18n="e_cpu">CPU (x264)</option>
-        </select>
-      </label>
-    </div>
 
-    <label class="check"><input id="audio" type="checkbox" checked> <span data-i18n="audio">Send sound too</span></label>
+      <div class="section-head"><h2 data-i18n="what"></h2></div>
+      <div class="segmented" role="radiogroup" data-aria="what">
+        <button type="button" role="radio" id="kind-monitor" data-kind="monitor"><span data-i18n="screen"></span></button>
+        <button type="button" role="radio" id="kind-window" data-kind="window"><span data-i18n="window"></span></button>
+      </div>
+      <select id="source" class="select" data-aria="source"></select>
+    </section>
 
-    <button id="start" class="primary" disabled data-i18n="start">Start casting</button>
-  </section>
-
-  <section id="session" hidden>
-    <div class="card">
-      <p id="state-line" class="big"></p>
-      <p id="detail-line" class="hint"></p>
-      <div id="code-box" hidden>
-        <p data-i18n="code_prompt">Type the 6-digit code shown on the receiver.</p>
-        <div class="row">
-          <input id="code" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="000000">
-          <button id="code-ok" class="primary" data-i18n="ok">OK</button>
+    <section id="view-casting" class="view" hidden>
+      <div class="hero">
+        <div class="pulse"><svg class="ic xl"><use href="#i-signal"/></svg></div>
+        <p id="state-line" class="hero-title"></p>
+        <p id="receiver-line" class="hero-sub"></p>
+        <p id="detail-line" class="muted"></p>
+      </div>
+      <div id="code-box" class="card" hidden>
+        <p data-i18n="code_prompt"></p>
+        <div class="code-row">
+          <input id="code" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="000000" data-aria="code">
+          <button id="code-ok" class="btn primary" data-i18n="ok"></button>
         </div>
       </div>
-      <p id="lock-note" class="hint note" hidden data-i18n="locked_note">The PC is locked: Windows shows nothing to capture, so the picture stays as it was. Unlock it to go on.</p>
-      <dl id="stats" hidden>
-        <div><dt data-i18n="s_decode">Receiver decode</dt><dd id="s-decode">–</dd></div>
-        <div><dt data-i18n="s_fps">Receiver fps</dt><dd id="s-fps">–</dd></div>
-        <div><dt data-i18n="s_dropped">Dropped</dt><dd id="s-dropped">–</dd></div>
-        <div><dt data-i18n="s_rate">Bitrate</dt><dd id="s-rate">–</dd></div>
-      </dl>
-    </div>
-    <button id="stop" class="danger" data-i18n="stop">Stop casting</button>
-  </section>
+      <div id="lock-note" class="notice warn" hidden><svg class="ic"><use href="#i-lock"/></svg><span data-i18n="locked_note"></span></div>
+      <details id="details" class="card details">
+        <summary><span data-i18n="details"></span><svg class="ic chev"><use href="#i-down"/></svg></summary>
+        <dl id="stats">
+          <div><dt data-i18n="s_decode"></dt><dd id="s-decode">–</dd></div>
+          <div><dt data-i18n="s_fps"></dt><dd id="s-fps">–</dd></div>
+          <div><dt data-i18n="s_dropped"></dt><dd id="s-dropped">–</dd></div>
+          <div><dt data-i18n="s_rate"></dt><dd id="s-rate">–</dd></div>
+        </dl>
+      </details>
+      <p class="muted center" data-i18n="tray_hint"></p>
+    </section>
 
-  <div id="error-box" class="error" role="alert" hidden>
-    <p id="error"></p>
-    <button id="forget" class="link" hidden data-i18n="forget">Forget this receiver</button>
-  </div>
-  <footer>
-    <label class="check"><input id="autostart" type="checkbox"> <span data-i18n="autostart">Start with Windows (waits in the tray)</span></label>
-    <p class="hint" data-i18n="tray_hint">Closing the window while casting keeps the cast running in the tray.</p>
-    <button id="logs" class="link" data-i18n="logs">Open log folder</button></footer>
-</main>
+    <section id="view-settings" class="view" hidden>
+      <div class="section-head"><h2 data-i18n="s_quality"></h2></div>
+      <div class="segmented" role="radiogroup" data-aria="s_quality">
+        <button type="button" role="radio" data-quality="saver"><span data-i18n="q_saver"></span></button>
+        <button type="button" role="radio" data-quality="balanced"><span data-i18n="q_balanced"></span></button>
+        <button type="button" role="radio" data-quality="smooth"><span data-i18n="q_smooth"></span></button>
+      </div>
+      <p id="quality-note" class="muted note"></p>
+      <div class="list">
+        <div class="row"><span data-i18n="s_audio"></span><button id="audio" class="switch" role="switch" aria-checked="false" data-aria="s_audio"></button></div>
+        <label class="row"><span data-i18n="s_encoder"></span><select id="encoder" class="select inline">
+          <option value="auto" data-i18n="e_auto"></option><option value="amf">AMD</option><option value="nvenc">NVIDIA</option><option value="x264" data-i18n="e_cpu"></option>
+        </select></label>
+      </div>
+      <p id="encoder-note" class="muted note" data-i18n="encoder_note"></p>
+
+      <div class="section-head"><h2 data-i18n="s_general"></h2></div>
+      <div class="list">
+        <div class="row"><span data-i18n="s_autostart"></span><button id="autostart" class="switch" role="switch" aria-checked="false" data-aria="s_autostart"></button></div>
+        <label class="row"><span data-i18n="s_language"></span><select id="language" class="select inline">
+          <option value="auto" data-i18n="lang_auto"></option><option value="zh">中文</option><option value="en">English</option>
+        </select></label>
+        <button id="open-paired" class="row link-row"><span data-i18n="s_paired"></span><span class="row-end"><span id="paired-count" class="muted"></span><svg class="ic small"><use href="#i-chevron"/></svg></span></button>
+      </div>
+
+      <div class="section-head"><h2 data-i18n="s_about"></h2></div>
+      <div class="list">
+        <div class="row"><span><span data-i18n="s_version"></span> <span id="version">–</span></span><span id="update-status" class="muted"></span></div>
+        <button id="check-update" class="row link-row"><span data-i18n="s_check_update"></span><svg class="ic small"><use href="#i-refresh"/></svg></button>
+        <button id="logs" class="row link-row"><span data-i18n="s_logs"></span><svg class="ic small"><use href="#i-external"/></svg></button>
+        <button id="open-source" class="row link-row"><span data-i18n="s_license"></span><svg class="ic small"><use href="#i-external"/></svg></button>
+      </div>
+    </section>
+
+    <section id="view-paired" class="view" hidden>
+      <p class="muted note" data-i18n="paired_intro"></p>
+      <ul id="paired-list" class="list"></ul>
+      <p id="paired-empty" class="muted center" hidden data-i18n="paired_none"></p>
+    </section>
+  </main>
+
+  <footer id="action-bar" class="action-bar">
+    <p id="action-summary" class="summary"></p>
+    <button id="start" class="btn primary wide" data-i18n="start"></button>
+    <button id="stop" class="btn danger wide" hidden data-i18n="stop"></button>
+  </footer>
+</div>
 <script src="app.js"></script>
 </body>
 </html>

@@ -49,6 +49,17 @@ fn utc(secs: u64) -> String {
     format!("{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}Z", rest / 3600, rest % 3600 / 60, rest % 60)
 }
 
+/// The tray menu's entries, kept to change their words when the language changes.
+struct TrayItems {
+    open: MenuItem<tauri::Wry>,
+    stop: MenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
+}
+
+fn tray_words(zh: bool) -> [&'static str; 3] {
+    if zh { ["打开 CastBay Desktop", "停止投屏", "退出"] } else { ["Open CastBay Desktop", "Stop casting", "Quit"] }
+}
+
 /// The person's choices, loaded at start and rewritten when they change.
 struct SettingsState(Mutex<Settings>);
 
@@ -219,6 +230,14 @@ fn set_settings(patch: serde_json::Value, app: AppHandle, settings: State<'_, Se
     let mut next = current.clone();
     next.apply(&patch)?;
     next.save(&app.path().app_data_dir().map_err(|e| e.to_string())?)?;
+    if next.language != current.language {
+        if let Some(items) = app.try_state::<TrayItems>() {
+            let [open, stop, quit] = tray_words(next.chinese(chinese()));
+            let _ = items.open.set_text(open);
+            let _ = items.stop.set_text(stop);
+            let _ = items.quit.set_text(quit);
+        }
+    }
     *current = next.clone();
     Ok(next)
 }
@@ -393,9 +412,10 @@ fn main() {
             let loaded = Settings::load(&app.path().app_data_dir().unwrap_or_default());
             let zh = loaded.chinese(chinese());
             app.manage(SettingsState(Mutex::new(loaded)));
-            let open = MenuItem::with_id(app, "open", if zh { "打开 CastBay Desktop" } else { "Open CastBay Desktop" }, true, None::<&str>)?;
-            let stop = MenuItem::with_id(app, "stop", if zh { "停止投屏" } else { "Stop casting" }, true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", if zh { "退出" } else { "Quit" }, true, None::<&str>)?;
+            let [open_text, stop_text, quit_text] = tray_words(zh);
+            let open = MenuItem::with_id(app, "open", open_text, true, None::<&str>)?;
+            let stop = MenuItem::with_id(app, "stop", stop_text, true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", quit_text, true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &stop, &quit_item])?;
             let mut tray = TrayIconBuilder::new()
                 .tooltip("CastBay Desktop")
@@ -416,6 +436,7 @@ fn main() {
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+            app.manage(TrayItems { open, stop, quit: quit_item });
             // Started with Windows: wait in the tray until the person opens it.
             if !std::env::args().any(|a| a == "--minimized") {
                 show_main(app.handle());
