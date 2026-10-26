@@ -1,0 +1,17 @@
+[package]
+name = "castbay-sender"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The CastBay Desktop casting engine: capture, encode and send over CastBay Link"
+
+[features]
+# Encode with the FFmpeg libraries built in (tools/build-ffmpeg) instead of an FFmpeg process.
+ffmpeg-lib = ["castbay-encode/ffmpeg-lib"]
+
+[dependencies]
+castbay-capture = { path = "../capture" }
+castbay-encode = { path = "../encode" }
+castbay-link = { path = "../link" }
+tokio = { version = "1", features = ["rt-multi-thread"] }

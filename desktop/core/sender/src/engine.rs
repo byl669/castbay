@@ -1,0 +1,412 @@
+//! The casting pipeline (Windows): a capture thread feeds pictures to the encoder, a repeater
+//! keeps a static screen alive, a reconnector replaces a broken connection.
+
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use castbay_capture::Target;
+use castbay_encode::ffmpeg::{Codec, FfmpegEncoder};
+use castbay_encode::{bgra_to_nv12, Config, Encoded};
+use castbay_link::{Event, SendResult, Session};
+
+use crate::{OnStatus, Options, Report, Status};
+
+/// The encoder library inside this process when it was built in, else an FFmpeg child process.
+enum Enc {
+    Process(FfmpegEncoder),
+    #[cfg(feature = "ffmpeg-lib")]
+    Library(castbay_encode::inproc::InProcessEncoder),
+}
+
+impl Enc {
+    /// Opens the chosen encoder, or with None the first that works: AMD, NVIDIA, then x264.
+    fn open(config: &Config, codec: Option<Codec>) -> Result<Enc, castbay_encode::Error> {
+        match codec {
+            Some(codec) => Enc::new(config, codec),
+            None => {
+                let mut last = None;
+                for codec in [Codec::Amf, Codec::Nvenc, Codec::X264] {
+                    match Enc::new(config, codec) {
+                        Ok(enc) => return Ok(enc),
+                        Err(e) => last = Some(e),
+                    }
+                }
+                Err(last.unwrap())
+            }
+        }
+    }
+
+    fn new(config: &Config, codec: Codec) -> Result<Enc, castbay_encode::Error> {
+        #[cfg(feature = "ffmpeg-lib")]
+        if std::env::var_os("CASTBAY_FFMPEG_PROCESS").is_none() {
+            return castbay_encode::inproc::InProcessEncoder::new(config, codec).map(Enc::Library);
+        }
+        FfmpegEncoder::new(config, codec).map(Enc::Process)
+    }
+
+    fn encode(&mut self, nv12: &[u8], pts: i64, key: bool) -> Result<Vec<Encoded>, castbay_encode::Error> {
+        match self {
+            // A child process cannot be told to make a key frame; it makes them on its own timer.
+            Enc::Process(e) => {
+                let _ = key;
+                e.encode(nv12, pts)
+            }
+            #[cfg(feature = "ffmpeg-lib")]
+            Enc::Library(e) => e.encode(nv12, pts, key).map(|u| u.into_iter().collect()),
+        }
+    }
+}
+
+struct State {
+    encoder: Option<Enc>,
+    nv12: Vec<u8>,
+    have_picture: bool,
+    last: Instant,
+    captured: VecDeque<Instant>,
+    lags_ms: Vec<f64>,
+    sent: u64,
+    dropped: u64,
+    repeats: u64,
+    bytes: u64,
+    reconnects: u64,
+    /// The cast cannot go on; the text says why.
+    failed: Option<String>,
+    /// The receiver ended the cast on purpose.
+    ended: Option<String>,
+    /// The connection broke; the reconnect thread is getting a new one.
+    lost: Option<String>,
+    /// The receiver asked for a key frame.
+    want_key: bool,
+    last_report: Option<(i64, u64, f64)>,
+    /// Pictures the capture delivered, and how many of them went to the encoder.
+    frames_seen: u64,
+    frames_taken: u64,
+}
+
+/// Pushes the current picture into the encoder and sends what came out.
+fn push(st: &mut State, link: &Session, captured: Instant, started: Instant, config: &Config, codec: Option<Codec>, repeat: bool) {
+    if st.lost.is_some() {
+        return;
+    }
+    if st.encoder.is_none() {
+        match Enc::open(config, codec) {
+            Ok(e) => st.encoder = Some(e),
+            Err(e) => {
+                st.failed = Some(e.to_string());
+                return;
+            }
+        }
+    }
+    let pts = captured.duration_since(started).as_micros() as i64;
+    let nv12 = std::mem::take(&mut st.nv12);
+    let result = st.encoder.as_mut().unwrap().encode(&nv12, pts, link.wants_key_frame() || st.want_key);
+    st.want_key = false;
+    st.nv12 = nv12;
+    st.captured.push_back(captured);
+    st.last = Instant::now();
+    if repeat {
+        st.repeats += 1;
+    }
+    match result {
+        Ok(units) => {
+            for unit in units {
+                if let Some(at) = st.captured.pop_front() {
+                    st.lags_ms.push(at.elapsed().as_secs_f64() * 1000.0);
+                }
+                st.bytes += unit.data.len() as u64;
+                match link.send_video(unit.pts_us as u64, unit.key, &unit.data) {
+                    SendResult::Sent => st.sent += 1,
+                    SendResult::Dropped => st.dropped += 1,
+                    SendResult::Closed => {
+                        st.lost.get_or_insert_with(|| "connection lost".into());
+                    }
+                }
+            }
+        }
+        Err(e) => st.failed = Some(e.to_string()),
+    }
+}
+
+/// Runs the cast and delivers its result through `done`. The thread that calls this ends up
+/// running the capture itself (the capture library wants to own its thread's message loop), so
+/// a supervisor thread watches for the end and reports it.
+pub fn run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, done: std::sync::mpsc::Sender<Result<Report, String>>) {
+    if let Err(e) = setup_and_run(options, on_status, code, stop, done.clone()) {
+        let _ = done.send(Err(e));
+    }
+}
+
+fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, done: std::sync::mpsc::Sender<Result<Report, String>>) -> Result<(), String> {
+    let Options { addr, receiver_id, name, password, target, fps, bitrate_bps, codec, data_dir, max_duration } = options;
+    on_status(Status::Connecting);
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+
+    // The first picture fixes the size, so the offer waits for it.
+    let first = Arc::new(Mutex::new(None::<(u32, u32)>));
+    {
+        let (first, target) = (first.clone(), target.clone());
+        std::thread::spawn(move || {
+            let _ = castbay_capture::windows::run(&target, move |frame| {
+                *first.lock().unwrap() = Some((frame.width & !1, frame.height & !1));
+                false
+            });
+        });
+    }
+    let waited = Instant::now();
+    let (width, height) = loop {
+        if let Some(size) = *first.lock().unwrap() {
+            break size;
+        }
+        if stop.load(Ordering::SeqCst) {
+            return Err("stopped".into());
+        }
+        if waited.elapsed() > Duration::from_secs(10) {
+            return Err("no picture from the screen (is it locked, or the window gone?)".into());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+
+    let identity = castbay_link::Identity::load_or_create(&data_dir).map_err(|e| e.to_string())?;
+    let mut pins = castbay_link::Pins::load(&data_dir);
+    let link_config = castbay_link::Config {
+        name,
+        password,
+        width,
+        height,
+        fps,
+        bitrate_bps,
+        source: if matches!(target, Target::Window(_)) { "window" } else { "screen" }.into(),
+    };
+    let mut ask = {
+        let (on_status, mut code) = (on_status.clone(), code);
+        move |expected: &str| -> Option<String> {
+            on_status(Status::NeedsCode);
+            code(expected)
+        }
+    };
+    let session = runtime
+        .block_on(castbay_link::connect(addr, &identity, &mut pins, receiver_id.as_deref(), &link_config, &mut ask))
+        .map_err(|e| e.to_string())?;
+    on_status(Status::Casting { receiver: session.receiver_name.clone(), width, height });
+
+    let started = Instant::now();
+    let interval = Duration::from_micros(1_000_000 / fps as u64);
+    let encoder_config = Config { width, height, fps, bitrate_bps, gop: fps * 2 };
+    let finish = Arc::new(AtomicBool::new(false));
+    let over = {
+        let (stop, finish) = (stop.clone(), finish.clone());
+        move || stop.load(Ordering::SeqCst) || finish.load(Ordering::SeqCst) || max_duration.is_some_and(|d| started.elapsed() > d)
+    };
+    let session_ref = Arc::new(Mutex::new(Some(session)));
+    let state = Arc::new(Mutex::new(State {
+        encoder: None,
+        nv12: vec![0; (width * height * 3 / 2) as usize],
+        have_picture: false,
+        last: Instant::now(),
+        captured: VecDeque::new(),
+        lags_ms: Vec::new(),
+        sent: 0,
+        dropped: 0,
+        repeats: 0,
+        bytes: 0,
+        reconnects: 0,
+        failed: None,
+        ended: None,
+        lost: None,
+        want_key: false,
+        last_report: None,
+        frames_seen: 0,
+        frames_taken: 0,
+    }));
+
+    // Reads what the receiver says, and repeats the last picture on a static screen so the
+    // stream stays alive.
+    let repeater = {
+        let (state, session_ref, config, over, on_status) = (state.clone(), session_ref.clone(), encoder_config.clone(), over.clone(), on_status.clone());
+        std::thread::spawn(move || loop {
+            std::thread::sleep(interval / 4);
+            let mut st = state.lock().unwrap();
+            if over() || st.failed.is_some() || st.ended.is_some() {
+                return;
+            }
+            let mut guard = session_ref.lock().unwrap();
+            let Some(link) = guard.as_mut() else { continue };
+            while let Some(event) = link.next_event() {
+                match event {
+                    Event::Closed(reason) if matches!(reason.as_str(), "stopped_by_receiver" | "replaced" | "receiver_stopped") => st.ended = Some(reason),
+                    Event::Closed(reason) => {
+                        st.lost.get_or_insert(reason);
+                    }
+                    Event::Stats { decode_ms, dropped, fps } => {
+                        st.last_report = Some((decode_ms, dropped, fps));
+                        on_status(Status::Receiver { decode_ms, dropped, fps });
+                    }
+                    Event::KeyFrameRequested => st.want_key = true,
+                }
+            }
+            if st.have_picture && st.last.elapsed() >= interval {
+                push(&mut st, link, Instant::now(), started, &config, codec, true);
+            }
+        })
+    };
+
+    // A broken connection is replaced by a new one (the pairing is remembered, so no code is
+    // needed); the encoder starts over, which begins the new stream with a key frame.
+    let reconnector = {
+        let (state, session_ref, handle, over, on_status) = (state.clone(), session_ref.clone(), runtime.handle().clone(), over.clone(), on_status.clone());
+        std::thread::spawn(move || {
+            let mut pins = pins;
+            loop {
+                std::thread::sleep(Duration::from_millis(200));
+                let reason = {
+                    let st = state.lock().unwrap();
+                    if over() || st.failed.is_some() || st.ended.is_some() {
+                        return;
+                    }
+                    match &st.lost {
+                        Some(reason) => reason.clone(),
+                        None => continue,
+                    }
+                };
+                if let Some(old) = session_ref.lock().unwrap().take() {
+                    handle.block_on(old.close());
+                }
+                on_status(Status::Reconnecting(reason));
+                let mut none = |_: &str| -> Option<String> { None };
+                let mut renewed = None;
+                for wait in [1u64, 2, 3, 5, 5, 5, 5, 5, 5, 5] {
+                    for _ in 0..wait * 10 {
+                        if over() {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                    match handle.block_on(castbay_link::connect(addr, &identity, &mut pins, receiver_id.as_deref(), &link_config, &mut none)) {
+                        Ok(session) => {
+                            renewed = Some(session);
+                            break;
+                        }
+                        Err(_) => {}
+                    }
+                }
+                let mut st = state.lock().unwrap();
+                match renewed {
+                    Some(session) => {
+                        *session_ref.lock().unwrap() = Some(session);
+                        st.encoder = None;
+                        st.captured.clear();
+                        st.lost = None;
+                        st.want_key = true;
+                        st.reconnects += 1;
+                        on_status(Status::Reconnected);
+                    }
+                    None => st.failed = Some("the receiver could not be reached again".into()),
+                }
+            }
+        })
+    };
+
+    // A supervisor waits for the end, tears down and reports; this thread runs the capture.
+    let capture_done = Arc::new(AtomicBool::new(false));
+    let supervisor = {
+        let (state, session_ref, over, capture_done, finish, on_status, stop) = (state.clone(), session_ref.clone(), over.clone(), capture_done.clone(), finish.clone(), on_status.clone(), stop.clone());
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_millis(100));
+                let st = state.lock().unwrap();
+                if over() || st.failed.is_some() || st.ended.is_some() || capture_done.load(Ordering::SeqCst) {
+                    break;
+                }
+            }
+            finish.store(true, Ordering::SeqCst);
+            let _ = repeater.join();
+            let _ = reconnector.join();
+            // The capture ends with its next picture; a screen that delivers none is left behind.
+            for _ in 0..30 {
+                if capture_done.load(Ordering::SeqCst) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            if let Some(link) = session_ref.lock().unwrap().take() {
+                runtime.block_on(link.close());
+            }
+            let _ = done.send(report(&state, started, &stop, &on_status));
+        })
+    };
+    let result = {
+        let (state, session_ref, over) = (state.clone(), session_ref.clone(), over.clone());
+        castbay_capture::windows::run(&target, move |frame| {
+            if over() {
+                return false;
+            }
+            let mut st = state.lock().unwrap();
+            if st.failed.is_some() || st.ended.is_some() {
+                return false;
+            }
+            st.frames_seen += 1;
+            if st.last.elapsed() + interval / 4 >= interval || !st.have_picture {
+                let (w, h) = ((frame.width & !1) as usize, (frame.height & !1) as usize);
+                if (w as u32, h as u32) == (width, height) {
+                    let mut nv12 = std::mem::take(&mut st.nv12);
+                    bgra_to_nv12(frame.data, frame.stride, w, h, &mut nv12);
+                    st.nv12 = nv12;
+                    st.have_picture = true;
+                    st.frames_taken += 1;
+                    if let Some(link) = session_ref.lock().unwrap().as_ref() {
+                        push(&mut st, link, Instant::now(), started, &encoder_config, codec, false);
+                    }
+                }
+            }
+            true
+        })
+    };
+    match result {
+        Ok(castbay_capture::Ended::SourceClosed) => {
+            state.lock().unwrap().ended.get_or_insert_with(|| "the captured window or screen went away".into());
+        }
+        Err(e) => {
+            state.lock().unwrap().failed.get_or_insert_with(|| e.to_string());
+        }
+        Ok(_) => {}
+    }
+    capture_done.store(true, Ordering::SeqCst);
+    let _ = supervisor.join();
+    Ok(())
+}
+
+/// Builds the report of a finished cast and announces its end.
+fn report(state: &Arc<Mutex<State>>, started: Instant, stop: &Arc<AtomicBool>, on_status: &OnStatus) -> Result<Report, String> {
+    let mut st = state.lock().unwrap();
+    let ended = if let Some(reason) = st.failed.clone() {
+        reason
+    } else if let Some(reason) = st.ended.clone() {
+        reason
+    } else if stop.load(Ordering::SeqCst) {
+        "stopped".into()
+    } else {
+        "finished".into()
+    };
+    on_status(Status::Ended(ended.clone()));
+    let mut lags = std::mem::take(&mut st.lags_ms);
+    lags.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let report = Report {
+        units_sent: st.sent,
+        units_dropped: st.dropped,
+        repeated_pictures: st.repeats,
+        reconnects: st.reconnects,
+        bytes: st.bytes,
+        seconds: started.elapsed().as_secs_f64(),
+        lags_ms: lags,
+        last_receiver_report: st.last_report,
+        pictures_seen: st.frames_seen,
+        pictures_taken: st.frames_taken,
+        ended: ended.clone(),
+    };
+    match &st.failed {
+        Some(reason) => Err(reason.clone()),
+        None => Ok(report),
+    }
+}

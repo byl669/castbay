@@ -256,16 +256,13 @@ fn data_dir(args: &[String]) -> std::path::PathBuf {
     base.join("CastBay Desktop")
 }
 
-/// Captures, encodes and casts to a CastBay receiver over CastBay Link. Repeats the last
-/// picture when the screen is static.
+/// Captures, encodes and casts to a CastBay receiver over CastBay Link (the engine is
+/// castbay-sender; this is its command line).
 #[cfg(windows)]
 fn cast(args: &[String]) {
-    use castbay_encode::ffmpeg::{Codec, FfmpegEncoder};
-    use castbay_encode::{bgra_to_nv12, Config};
-    use castbay_link::{Event, SendResult};
-    use std::sync::{Arc, Mutex};
+    use castbay_sender::{Codec, Options, Status};
+    use std::sync::Arc;
 
-    let runtime = tokio::runtime::Runtime::new().expect("a tokio runtime");
     let target = match option(args, "--window") {
         Some(title) => Target::Window(title.to_string()),
         None => Target::Monitor(option(args, "--monitor").and_then(|v| v.parse().ok()).unwrap_or(0)),
@@ -297,40 +294,8 @@ fn cast(args: &[String]) {
         }
     };
 
-    let dir = data_dir(args);
-    let identity = castbay_link::Identity::load_or_create(&dir).expect("identity");
-    let mut pins = castbay_link::Pins::load(&dir);
-
-    // The first picture fixes the size, so the offer waits for it.
-    let first = Arc::new(Mutex::new(None::<(u32, u32)>));
-    {
-        let first = first.clone();
-        let probe_target = target.clone();
-        std::thread::spawn(move || {
-            let _ = castbay_capture::windows::run(&probe_target, move |frame| {
-                *first.lock().unwrap() = Some((frame.width & !1, frame.height & !1));
-                false
-            });
-        });
-    }
-    let (width, height) = loop {
-        if let Some(size) = *first.lock().unwrap() {
-            break size;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    };
-
-    let config = castbay_link::Config {
-        name: option(args, "--name").map(str::to_string).unwrap_or_else(|| std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Computer".into())),
-        password: option(args, "--password").map(str::to_string),
-        width,
-        height,
-        fps,
-        bitrate_bps: bitrate,
-        source: if matches!(target, Target::Window(_)) { "window" } else { "screen" }.into(),
-    };
     let code_option = option(args, "--code").map(str::to_string);
-    let mut code = move |expected: &str| -> Option<String> {
+    let code = move |expected: &str| -> Option<String> {
         match code_option.as_deref() {
             Some("auto") => Some(expected.to_string()),
             Some(digits) if digits != "prompt" => Some(digits.to_string()),
@@ -342,267 +307,48 @@ fn cast(args: &[String]) {
             }
         }
     };
-    let session = runtime.block_on(castbay_link::connect(addr, &identity, &mut pins, receiver_id.as_deref(), &config, &mut code));
-    let session = match session {
-        Ok(session) => session,
+    let options = Options {
+        addr,
+        receiver_id,
+        name: option(args, "--name").map(str::to_string).unwrap_or_else(|| std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Computer".into())),
+        password: option(args, "--password").map(str::to_string),
+        target: target.clone(),
+        fps,
+        bitrate_bps: bitrate,
+        codec: Some(codec),
+        data_dir: data_dir(args),
+        max_duration: Some(Duration::from_secs(seconds)),
+    };
+    let on_status = Arc::new(move |status: Status| match status {
+        Status::Casting { receiver, width, height } => {
+            println!("casting {target:?} ({width}x{height}) to {receiver} for {seconds} s at {fps} fps, {} kbit/s, {codec:?}", bitrate / 1000)
+        }
+        Status::Reconnecting(reason) => println!("connection lost ({reason}); reconnecting"),
+        Status::Reconnected => println!("reconnected"),
+        _ => {}
+    });
+    let handle = castbay_sender::start(options, on_status, Box::new(code));
+    let report = match handle.join() {
+        Ok(report) => report,
         Err(e) => {
             eprintln!("{e}");
             std::process::exit(1);
         }
     };
-    println!("casting {target:?} ({width}x{height}) to {} for {seconds} s at {fps} fps, {} kbit/s, {codec:?}", session.receiver_name, bitrate / 1000);
-
-    struct State {
-        encoder: Option<Enc>,
-        nv12: Vec<u8>,
-        have_picture: bool,
-        last: Instant,
-        captured: std::collections::VecDeque<Instant>,
-        lags_ms: Vec<f64>,
-        sent: u64,
-        dropped: u64,
-        repeats: u64,
-        bytes: u64,
-        failed: bool,
-        /// The receiver ended the cast on purpose.
-        ended: Option<String>,
-        /// The connection broke; the reconnect thread is getting a new one.
-        lost: Option<String>,
-        /// The receiver asked for a key frame.
-        want_key: bool,
-        reconnects: u64,
-        last_stats: Option<(i64, u64, f64)>,
-    }
-    let started = Instant::now();
-    let interval = Duration::from_micros(1_000_000 / fps as u64);
-    let session_ref = Arc::new(Mutex::new(Some(session)));
-    let state = Arc::new(Mutex::new(State {
-        encoder: None,
-        nv12: vec![0; (width * height * 3 / 2) as usize],
-        have_picture: false,
-        last: started,
-        captured: Default::default(),
-        lags_ms: Vec::new(),
-        sent: 0,
-        dropped: 0,
-        repeats: 0,
-        bytes: 0,
-        failed: false,
-        lost: None,
-        want_key: false,
-        reconnects: 0,
-        ended: None,
-        last_stats: None,
-    }));
-
-    // The encoder library inside this process when it was built in, else an FFmpeg child process.
-    enum Enc {
-        Process(FfmpegEncoder),
-        #[cfg(feature = "ffmpeg-lib")]
-        Library(castbay_encode::inproc::InProcessEncoder),
-    }
-    impl Enc {
-        fn new(config: &Config, codec: Codec) -> Result<Enc, castbay_encode::Error> {
-            #[cfg(feature = "ffmpeg-lib")]
-            if std::env::var_os("CASTBAY_FFMPEG_PROCESS").is_none() {
-                return castbay_encode::inproc::InProcessEncoder::new(config, codec).map(Enc::Library);
-            }
-            FfmpegEncoder::new(config, codec).map(Enc::Process)
-        }
-        fn encode(&mut self, nv12: &[u8], pts: i64, key: bool) -> Result<Vec<castbay_encode::Encoded>, castbay_encode::Error> {
-            match self {
-                // A child process cannot be told to make a key frame; it makes them on its own timer.
-                Enc::Process(e) => {
-                    let _ = key;
-                    e.encode(nv12, pts)
-                }
-                #[cfg(feature = "ffmpeg-lib")]
-                Enc::Library(e) => e.encode(nv12, pts, key).map(|u| u.into_iter().collect()),
-            }
-        }
-    }
-
-    // Pushes the current picture into the encoder and sends what came out.
-    fn push(st: &mut State, link: &castbay_link::Session, captured: Instant, started: Instant, config: &Config, codec: Codec, repeat: bool) {
-        if st.lost.is_some() {
-            return;
-        }
-        if st.encoder.is_none() {
-            match Enc::new(config, codec) {
-                Ok(e) => st.encoder = Some(e),
-                Err(e) => {
-                    eprintln!("{e}");
-                    st.failed = true;
-                    return;
-                }
-            }
-        }
-        let pts = captured.duration_since(started).as_micros() as i64;
-        let nv12 = std::mem::take(&mut st.nv12);
-        let result = st.encoder.as_mut().unwrap().encode(&nv12, pts, link.wants_key_frame() || st.want_key);
-        st.want_key = false;
-        st.nv12 = nv12;
-        st.captured.push_back(captured);
-        st.last = Instant::now();
-        if repeat {
-            st.repeats += 1;
-        }
-        match result {
-            Ok(units) => {
-                for unit in units {
-                    if let Some(at) = st.captured.pop_front() {
-                        st.lags_ms.push(at.elapsed().as_secs_f64() * 1000.0);
-                    }
-                    st.bytes += unit.data.len() as u64;
-                    match link.send_video(unit.pts_us as u64, unit.key, &unit.data) {
-                        SendResult::Sent => st.sent += 1,
-                        SendResult::Dropped => st.dropped += 1,
-                        SendResult::Closed => {
-                            st.lost.get_or_insert_with(|| "connection lost".into());
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("{e}");
-                st.failed = true;
-            }
-        }
-    }
-    let encoder_config = Config { width, height, fps, bitrate_bps: bitrate, gop: fps * 2 };
-
-    // Static screens deliver few pictures: send the last one again so the stream stays alive.
-    let repeater = {
-        let (state, session_ref, config) = (state.clone(), session_ref.clone(), encoder_config.clone());
-        std::thread::spawn(move || loop {
-            std::thread::sleep(interval / 4);
-            let mut st = state.lock().unwrap();
-            if st.failed || st.ended.is_some() || started.elapsed() > Duration::from_secs(seconds) + Duration::from_secs(1) {
-                return;
-            }
-            if st.have_picture && st.last.elapsed() >= interval {
-                if let Some(link) = session_ref.lock().unwrap().as_ref() {
-                    push(&mut st, link, Instant::now(), started, &config, codec, true);
-                }
-            }
-        })
-    };
-
-    // A broken connection is replaced by a new one (the pairing is remembered, so no code is
-    // needed); the encoder starts over, which begins the new stream with a key frame.
-    let reconnector = {
-        let (state, session_ref, handle) = (state.clone(), session_ref.clone(), runtime.handle().clone());
-        std::thread::spawn(move || {
-            let mut pins = pins;
-            loop {
-                std::thread::sleep(Duration::from_millis(200));
-                let reason = {
-                    let st = state.lock().unwrap();
-                    if st.failed || st.ended.is_some() || started.elapsed() > Duration::from_secs(seconds) + Duration::from_secs(1) {
-                        return;
-                    }
-                    match &st.lost {
-                        Some(reason) => reason.clone(),
-                        None => continue,
-                    }
-                };
-                if let Some(old) = session_ref.lock().unwrap().take() {
-                    handle.block_on(old.close());
-                }
-                println!("connection lost ({reason}); reconnecting");
-                let mut none = |_: &str| -> Option<String> { None };
-                let mut renewed = None;
-                for wait in [1u64, 2, 3, 5, 5, 5, 5, 5, 5, 5] {
-                    std::thread::sleep(Duration::from_secs(wait));
-                    if started.elapsed() > Duration::from_secs(seconds) {
-                        break;
-                    }
-                    match handle.block_on(castbay_link::connect(addr, &identity, &mut pins, receiver_id.as_deref(), &config, &mut none)) {
-                        Ok(session) => {
-                            renewed = Some(session);
-                            break;
-                        }
-                        Err(e) => eprintln!("reconnect failed: {e}"),
-                    }
-                }
-                let mut st = state.lock().unwrap();
-                match renewed {
-                    Some(session) => {
-                        *session_ref.lock().unwrap() = Some(session);
-                        st.encoder = None;
-                        st.captured.clear();
-                        st.lost = None;
-                        st.want_key = true;
-                        st.reconnects += 1;
-                        println!("reconnected");
-                    }
-                    None => st.failed = true,
-                }
-            }
-        })
-    };
-
-    // Capture ends only when a picture arrives: a locked or switched-off screen delivers none.
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(seconds + 4));
-        eprintln!("no pictures arrived at the end (is the screen locked?); giving up");
-        std::process::exit(3);
-    });
-    let shared = state.clone();
-    let shared_session = session_ref.clone();
-    let limit = Duration::from_secs(seconds);
-    let result = castbay_capture::windows::run(&target, move |frame| {
-        let mut st = shared.lock().unwrap();
-        if let Some(link) = shared_session.lock().unwrap().as_mut() {
-            while let Some(event) = link.next_event() {
-                match event {
-                    Event::Closed(reason) if matches!(reason.as_str(), "stopped_by_receiver" | "replaced" | "receiver_stopped") => st.ended = Some(reason),
-                    Event::Closed(reason) => {
-                        st.lost.get_or_insert(reason);
-                    }
-                    Event::Stats { decode_ms, dropped, fps } => st.last_stats = Some((decode_ms, dropped, fps)),
-                    Event::KeyFrameRequested => st.want_key = true,
-                }
-            }
-        }
-        if st.failed || st.ended.is_some() {
-            return false;
-        }
-        if st.last.elapsed() + interval / 4 >= interval || !st.have_picture {
-            let (w, h) = ((frame.width & !1) as usize, (frame.height & !1) as usize);
-            if (w as u32, h as u32) == (width, height) {
-                let mut nv12 = std::mem::take(&mut st.nv12);
-                bgra_to_nv12(frame.data, frame.stride, w, h, &mut nv12);
-                st.nv12 = nv12;
-                st.have_picture = true;
-                if let Some(link) = shared_session.lock().unwrap().as_ref() {
-                    push(&mut st, link, Instant::now(), started, &encoder_config, codec, false);
-                }
-            }
-        }
-        frame.timestamp < limit && !st.failed
-    });
-    let _ = repeater.join();
-    let _ = reconnector.join();
-    if let Some(link) = session_ref.lock().unwrap().take() {
-        runtime.block_on(link.close());
-    }
-    let mut st = state.lock().unwrap();
-    let elapsed = started.elapsed().as_secs_f64();
-    println!("ended: {result:?}{}", st.ended.as_ref().map(|r| format!(", receiver: {r}")).unwrap_or_default());
+    println!("ended: {}", report.ended);
     println!(
         "units sent: {} ({} dropped, {} repeated pictures), {:.2} Mbit/s, {:.1} fps",
-        st.sent, st.dropped, st.repeats, st.bytes as f64 * 8.0 / elapsed / 1e6, st.sent as f64 / elapsed
+        report.units_sent, report.units_dropped, report.repeated_pictures, report.bytes as f64 * 8.0 / report.seconds / 1e6, report.units_sent as f64 / report.seconds
     );
-    if st.reconnects > 0 {
-        println!("reconnected {} time(s)", st.reconnects);
+    println!("capture delivered {} pictures, {} went to the encoder", report.pictures_seen, report.pictures_taken);
+    if report.reconnects > 0 {
+        println!("reconnected {} time(s)", report.reconnects);
     }
-    if let Some((decode_ms, dropped, fps)) = st.last_stats {
+    if let Some((decode_ms, dropped, fps)) = report.last_receiver_report {
         println!("receiver reports: decode {decode_ms} ms, {dropped} dropped, {fps:.1} fps");
     }
-    st.lags_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    if !st.lags_ms.is_empty() {
-        let at = |q: f64| st.lags_ms[((st.lags_ms.len() - 1) as f64 * q) as usize];
+    if !report.lags_ms.is_empty() {
+        let at = |q: f64| report.lags_ms[((report.lags_ms.len() - 1) as f64 * q) as usize];
         println!("captured to ready to send: median {:.0} ms, 95th {:.0} ms, worst {:.0} ms", at(0.5), at(0.95), at(1.0));
     }
 }

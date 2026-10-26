@@ -8,12 +8,13 @@ description = "Command-line CastBay Desktop sender, for tests and benchmarks"
 
 [features]
 # Encode with FFmpeg libraries built in (see tools/build-ffmpeg) instead of an FFmpeg process.
-ffmpeg-lib = ["castbay-encode/ffmpeg-lib"]
+ffmpeg-lib = ["castbay-encode/ffmpeg-lib", "castbay-sender/ffmpeg-lib"]
 
 [dependencies]
 castbay-capture = { path = "../capture" }
 castbay-encode = { path = "../encode" }
 castbay-link = { path = "../link" }
+castbay-sender = { path = "../sender" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 [target.'cfg(windows)'.dependencies.windows]
