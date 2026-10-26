@@ -268,6 +268,8 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
         .block_on(castbay_link::connect(addr, &identity, &mut pins, receiver_id.as_deref(), &link_config, &mut ask))
         .map_err(Failure::from)?;
     on_status(Status::Casting { receiver: session.receiver_name.clone(), width, height });
+    // Awake for as long as this thread (which ends up running the capture) casts.
+    let _awake = crate::power::Awake::new();
     let audio_accepted = session.audio_accepted;
 
     let started = Instant::now();
@@ -307,6 +309,22 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
             Some(std::thread::spawn(move || run_audio(enc, session_ref, over, started, counter)))
         }
         _ => None,
+    };
+
+    // Tells the window when the screen gets locked or unlocked.
+    let lock_watcher = {
+        let (over, on_status) = (over.clone(), on_status.clone());
+        std::thread::spawn(move || {
+            let mut locked = false;
+            while !over() {
+                let now = crate::power::screen_locked();
+                if now != locked {
+                    locked = now;
+                    on_status(Status::ScreenLocked(locked));
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        })
     };
 
     // Reads what the receiver says, and repeats the last picture on a static screen so the
@@ -414,6 +432,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
             if let Some(thread) = audio_thread {
                 let _ = thread.join();
             }
+            let _ = lock_watcher.join();
             // The capture ends with its next picture; a screen that delivers none is left behind.
             for _ in 0..30 {
                 if capture_done.load(Ordering::SeqCst) {

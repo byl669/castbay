@@ -65,7 +65,7 @@ Settings > Apps > CastBay Desktop > Uninstall; it asks whether to delete your pa
   接收端已开启电脑投屏；防火墙允许专用网络。
 - **"Needs someone to allow it" / 需要有人在接收端确认**: the receiver asks on its own screen the first time. 接收端第一次会在它的屏幕上询问。
 - **"Another device is using it" / 接收端正被另一台设备使用**: stop the other cast first, or turn on takeover at the receiver. 先停掉另一台，或在接收端允许接管。
-- **Picture frozen while the PC is locked / 电脑锁屏后画面不动**: Windows stops screen capture on the lock screen. 锁屏时 Windows 不提供屏幕画面。
+- **Picture frozen while the PC is locked / 电脑锁屏后画面不动**: Windows gives nothing to capture on the lock screen; the window says so and the cast goes on when you unlock. While casting, the PC does not fall asleep or switch its screen off by itself. 锁屏时 Windows 不提供屏幕画面，窗口会提示，解锁后自动继续；投屏期间电脑不会自己休眠或息屏。
 - **Receiver was reset / 接收端被重置过**: if the window says its key changed, choose **Forget this receiver** and pair again. 提示密钥变化时点“忘记这个接收端”并重新配对。
 - **Log files / 日志**: the **Open log folder** button at the bottom of the window. 窗口底部的“打开日志文件夹”。
 

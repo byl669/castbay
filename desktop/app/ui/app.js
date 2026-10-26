@@ -17,7 +17,7 @@ const zh = {
   w_title: "开始使用", w_1: "在电视或平板上打开映湾，在设置里开启“电脑投屏”。",
   w_2: "如果 Windows 防火墙弹窗询问，请允许在专用网络上访问，否则找不到接收端。",
   w_3: "在下面选择接收端并开始投屏。第一次连接时接收端会显示 6 位配对码，在这里输入即可。", w_ok: "知道了",
-  audio: "同时传声音", autostart: "开机时自动启动（在系统托盘待命）", tray_hint: "投屏时关闭窗口，投屏会继续在系统托盘里运行。",
+  audio: "同时传声音", locked_note: "电脑已锁屏：Windows 在锁屏时不提供画面，所以画面会停住。解锁后会自动继续。", autostart: "开机时自动启动（在系统托盘待命）", tray_hint: "投屏时关闭窗口，投屏会继续在系统托盘里运行。",
   update_open: "下载", update_text: "有新版本 {0} 可用", failed: "无法投屏：{0}", logs: "打开日志文件夹", forget: "忘记这个接收端",
   f_busy: "接收端正在被另一台设备使用。", f_blocked: "接收端屏蔽了这台电脑。请在接收端的“已知设备”里解除屏蔽。",
   f_approval_needed: "接收端需要有人在它的屏幕上点“允许”。请确认后重试。", f_locked: "配对尝试次数过多，接收端暂时锁定了配对，请一分钟后重试。",
@@ -151,10 +151,11 @@ function setState(text, detail = "") {
 listen("status", ({ payload: s }) => {
   showError("");
   switch (s.kind) {
-    case "connecting": showSession(true); $("code-box").hidden = true; $("stats").hidden = true; setState(t("connecting")); break;
+    case "connecting": $("lock-note").hidden = true; showSession(true); $("code-box").hidden = true; $("stats").hidden = true; setState(t("connecting")); break;
     case "needs_code": setState(t("needs_code")); $("code-box").hidden = false; $("code").value = ""; $("code").focus(); break;
     case "casting": $("code-box").hidden = true; $("stats").hidden = false; setState(t("casting", s.receiver), t("casting_detail", s.width, s.height)); break;
     case "reconnecting": setState(t("reconnecting")); break;
+    case "locked": $("lock-note").hidden = !s.locked; break;
     case "reconnected": setState(t("casting", selected?.name ?? "")); break;
     case "stats":
       $("s-decode").textContent = `${s.decode_ms} ms`;
