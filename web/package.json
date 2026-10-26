@@ -8,8 +8,8 @@
     "preview": "astro preview"
   },
   "dependencies": {
-    "@astrojs/markdown-satteri": "^0.4.3",
+    "@astrojs/markdown-satteri": "^0.4.5",
     "@astrojs/rss": "^4.0.19",
-    "astro": "^7.3.6"
+    "astro": "^7.4.2"
   }
 }
