@@ -40,6 +40,7 @@ foreach ($round in 1, 2) {
 
 # A start-with-Windows entry survives an upgrade and is removed by an uninstall.
 $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+New-Item -Path $run -Force | Out-Null
 Set-ItemProperty $run -Name CastBayDesktop -Value "`"$exe`" --minimized"
 Msiexec "/i `"$Msi`" /qn /l*v `"$log`""
 Check ($null -ne (Get-ItemProperty $run -Name CastBayDesktop -ErrorAction SilentlyContinue)) 'installing over keeps start-with-Windows'
