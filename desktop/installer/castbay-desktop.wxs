@@ -10,7 +10,7 @@
 
   wix build -arch x64 -ext WixToolset.UI.wixext -culture <culture> -loc <culture>.wxl
             -d Version=0.1.0 -d AppExe=... -d AppIcon=... -d LicenseTxt=... -d LicenseRtf=...
-            -sval -o out.msi castbay-desktop.wxs
+            -o out.msi castbay-desktop.wxs
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="CastBay Desktop" Manufacturer="CastBay" Version="$(Version)" Language="$(Lcid)"
