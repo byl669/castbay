@@ -12,6 +12,8 @@ pub use castbay_encode::ffmpeg::Codec;
 
 #[cfg(windows)]
 mod engine;
+#[cfg(windows)]
+mod power;
 
 /// Everything needed to start a cast.
 pub struct Options {
@@ -49,6 +51,9 @@ pub enum Status {
     Reconnected,
     /// The receiver's once-a-second report.
     Receiver { decode_ms: i64, dropped: u64, fps: f64 },
+    /// The PC's screen is locked (true) or unlocked again (false): Windows gives nothing to capture
+    /// meanwhile, so the picture stays as it was.
+    ScreenLocked(bool),
     /// The cast is over; the text says why.
     Ended(String),
 }
