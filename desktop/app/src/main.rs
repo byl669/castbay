@@ -360,7 +360,7 @@ mod autostart {
     const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
     const RUN_VALUE: &str = "CastBayDesktop";
 
-    fn reg(args: &[&str]) -> std::io::Result<std::process::ExitStatus> {
+    pub fn reg(args: &[&str]) -> std::io::Result<std::process::ExitStatus> {
         use std::os::windows::process::CommandExt;
         let mut command = std::process::Command::new("reg");
         command.args(args);
@@ -442,7 +442,7 @@ fn webview2_installed() -> bool {
         r"HKCU\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
     ]
     .iter()
-    .any(|key| reg(&["query", key, "/v", "pv"]).map(|s| s.success()).unwrap_or(false))
+    .any(|key| autostart::reg(&["query", key, "/v", "pv"]).map(|s| s.success()).unwrap_or(false))
 }
 
 /// Says what is missing and offers the download, instead of failing without a word.
