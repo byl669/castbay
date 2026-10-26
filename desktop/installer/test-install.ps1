@@ -28,10 +28,10 @@ $app.CloseMainWindow() | Out-Null
 Start-Sleep 2
 if (-not $app.HasExited) { $app.Kill() }
 
-# `_?=` makes the uninstaller run in place and wait, instead of copying itself and returning.
-$u = Start-Process (Join-Path $dir 'Uninstall.exe') -ArgumentList '/S', "_?=$dir" -Wait -PassThru
-Check ($u.ExitCode -eq 0) 'uninstall exits 0'
-Remove-Item (Join-Path $dir 'Uninstall.exe') -Force -ErrorAction SilentlyContinue
+# Uninstall as a person would: the uninstaller copies itself to a temporary folder, runs from there
+# (so it can delete its own file and folder) and the first process returns at once. Wait for it.
+Start-Process (Join-Path $dir 'Uninstall.exe') -ArgumentList '/S' | Out-Null
+for ($i = 0; $i -lt 60 -and (Test-Path $dir); $i++) { Start-Sleep 1 }
 Check (-not (Test-Path $exe)) 'program removed'
 Check (-not (Test-Path $lnk)) 'Start menu shortcut removed'
 Check (-not (Test-Path $key)) 'Settings > Apps entry removed'

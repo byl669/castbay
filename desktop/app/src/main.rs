@@ -11,7 +11,9 @@ use std::time::Duration;
 use castbay_sender::{Codec, Options, Status, Stopper, Target};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 
 /// Appends a line to the log file (kept to about 1 MB, plus the previous file).
 fn log(app: &AppHandle, line: &str) {
@@ -243,10 +245,127 @@ fn stop_cast(state: State<'_, Casting>) {
     }
 }
 
+/// Whether Windows itself speaks Chinese, for the few words the tray menu needs.
+fn chinese() -> bool {
+    #[cfg(windows)]
+    {
+        // The primary language is the low ten bits; Chinese is 0x04.
+        unsafe { windows::Win32::Globalization::GetUserDefaultUILanguage() & 0x3ff == 0x04 }
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+fn show_main(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn stop_casting(app: &AppHandle) {
+    if let Some(stopper) = app.state::<Casting>().stopper.lock().unwrap().as_ref() {
+        stopper.stop();
+    }
+}
+
+/// Ends a cast in progress (the receiver is told goodbye) and then the program.
+fn quit(app: &AppHandle) {
+    stop_casting(app);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(800));
+        app.exit(0);
+    });
+}
+
+const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+const RUN_VALUE: &str = "CastBayDesktop";
+
+fn reg(args: &[&str]) -> std::io::Result<std::process::ExitStatus> {
+    let mut command = std::process::Command::new("reg");
+    command.args(args);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // no console window
+    }
+    command.output().map(|o| o.status)
+}
+
+/// Whether the program starts with Windows (for the window's switch).
+#[tauri::command]
+fn autostart_get() -> bool {
+    reg(&["query", RUN_KEY, "/v", RUN_VALUE]).map(|s| s.success()).unwrap_or(false)
+}
+
+/// Starts the program with Windows, minimised into the tray, or stops doing so.
+#[tauri::command]
+fn autostart_set(on: bool, app: AppHandle) -> Result<(), String> {
+    if on {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let value = format!("\"{}\" --minimized", exe.display());
+        let ok = reg(&["add", RUN_KEY, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", &value, "/f"]).map_err(|e| e.to_string())?.success();
+        if !ok {
+            return Err("could not write the startup entry".into());
+        }
+    } else {
+        let _ = reg(&["delete", RUN_KEY, "/v", RUN_VALUE, "/f"]);
+    }
+    log(&app, &format!("autostart {}", if on { "on" } else { "off" }));
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
+        // A second launch (the shortcut again, Windows startup) brings the first one forward.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .manage(Casting::default())
-        .invoke_handler(tauri::generate_handler![discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release])
+        .setup(|app| {
+            let zh = chinese();
+            let open = MenuItem::with_id(app, "open", if zh { "打开 CastBay Desktop" } else { "Open CastBay Desktop" }, true, None::<&str>)?;
+            let stop = MenuItem::with_id(app, "stop", if zh { "停止投屏" } else { "Stop casting" }, true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", if zh { "退出" } else { "Quit" }, true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open, &stop, &quit_item])?;
+            let mut tray = TrayIconBuilder::new()
+                .tooltip("CastBay Desktop")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "open" => show_main(app),
+                    "stop" => stop_casting(app),
+                    "quit" => quit(app),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                        show_main(tray.app_handle());
+                    }
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+            tray.build(app)?;
+            // Started with Windows: wait in the tray until the person opens it.
+            if !std::env::args().any(|a| a == "--minimized") {
+                show_main(app.handle());
+            }
+            Ok(())
+        })
+        // Closing the window during a cast leaves the cast running in the tray; otherwise it quits.
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let casting = window.state::<Casting>().stopper.lock().unwrap().is_some();
+                if casting {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .invoke_handler(tauri::generate_handler![discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, autostart_get, autostart_set])
         .run(tauri::generate_context!())
         .expect("the CastBay Desktop window failed to start");
 }
