@@ -91,6 +91,21 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
     private val registrations = mutableListOf<NsdManager.RegistrationListener>()
     private val registeredTypes = mutableSetOf<String>()
     private var running = false
+    private var retries = 0
+    private var registerAll: (() -> Unit)? = null
+    /** NsdManager sometimes never answers when the same names were withdrawn a moment ago: try again. */
+    private val watchdog: Runnable = Runnable {
+        if (!running || registeredTypes.size == 2) return@Runnable
+        if (retries >= MAX_RETRIES) {
+            Diagnostics.record("discovery", "Registering did not finish after $retries retries")
+            return@Runnable
+        }
+        retries++
+        Diagnostics.record("discovery", "Registering is slow, trying again ($retries)")
+        unregisterAll()
+        registerAll?.invoke()
+        mainHandler.postDelayed(watchdog, REGISTER_TIMEOUT_MS)
+    }
     private var onReady: (() -> Unit)? = null
     private var onError: ((String) -> Unit)? = null
 
@@ -131,12 +146,18 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
             val deviceId = deviceId()
             val advertisedPort = protocolPort ?: requireNotNull(listenerSocket).localPort
             // Same layout as RPiPlay's dnssd_register_airplay / dnssd_register_raop.
+            registerAll = {
+                register(AIRPLAY, displayName, advertisedPort,
+                    linkedMapOf("deviceid" to deviceId) + records.airplay)
+                registering = RAOP
+                register(RAOP, "${deviceId.replace(":", "")}@$displayName", advertisedPort,
+                    records.raop)
+            }
             registering = AIRPLAY
-            register(AIRPLAY, displayName, advertisedPort,
-                linkedMapOf("deviceid" to deviceId) + records.airplay)
-            registering = RAOP
-            register(RAOP, "${deviceId.replace(":", "")}@$displayName", advertisedPort,
-                records.raop)
+            registerAll?.invoke()
+            retries = 0
+            mainHandler.removeCallbacks(watchdog)
+            mainHandler.postDelayed(watchdog, REGISTER_TIMEOUT_MS)
             true
         } catch (error: Exception) {
             Log.e(TAG, "Could not advertise AirPlay discovery", error)
@@ -148,8 +169,7 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
         }
     }
 
-    fun stop() {
-        running = false
+    private fun unregisterAll() {
         registrations.forEach { listener ->
             try {
                 nsdManager.unregisterService(listener)
@@ -159,6 +179,13 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
         }
         registrations.clear()
         registeredTypes.clear()
+    }
+
+    fun stop() {
+        running = false
+        mainHandler.removeCallbacks(watchdog)
+        registerAll = null
+        unregisterAll()
         // A failure stays visible; anything else is no longer advertised.
         _status = _status.copy(airplay = withdrawn(_status.airplay), raop = withdrawn(_status.raop))
         multicastLock?.let { if (it.isHeld) it.release() }
@@ -246,5 +273,7 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
         private const val TAG = "AirPlayDiscovery"
         const val AIRPLAY = "_airplay._tcp"
         const val RAOP = "_raop._tcp"
+        private const val REGISTER_TIMEOUT_MS = 8_000L
+        private const val MAX_RETRIES = 2
     }
 }
