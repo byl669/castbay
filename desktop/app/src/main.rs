@@ -210,6 +210,16 @@ fn forget_receiver(id: String, app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Opens a release page of this project in the browser (and nothing else).
+#[tauri::command]
+fn open_release(url: String) -> Result<(), String> {
+    if !url.starts_with("https://github.com/weenas/castbay/releases/") || url.chars().any(|c| c.is_control() || c == '"' || c == ' ') {
+        return Err("not a release page of this project".into());
+    }
+    std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Shows the folder with the log file.
 #[tauri::command]
 fn open_logs(app: AppHandle) -> Result<(), String> {
@@ -232,7 +242,7 @@ fn stop_cast(state: State<'_, Casting>) {
 fn main() {
     tauri::Builder::default()
         .manage(Casting::default())
-        .invoke_handler(tauri::generate_handler![discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs])
+        .invoke_handler(tauri::generate_handler![discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release])
         .run(tauri::generate_context!())
         .expect("the CastBay Desktop window failed to start");
 }
