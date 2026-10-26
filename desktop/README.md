@@ -13,6 +13,10 @@ window (Tauri 2 over the engine, a plain HTML page, no Node needed): pick a rece
 window and a quality, type the pairing code once, and cast; tray, start with Windows and update
 notice included. The receiver side is in the Android app (`service/desktop/`).
 
+A Linux version is in progress (docs/plan-linux.md): the engine, the encoders (x264, NVENC, AAC)
+and the Link code build and pass their tests on Ubuntu; capture (Wayland: desktop portal and
+PipeWire), sound, the system integration and packages are next.
+
 Building on Windows: `tools/build-ffmpeg.cmd` builds FFmpeg from the submodules (needs MSYS2 and
 Visual Studio's C++ tools); then `cargo build --release -p castbay-desktop --features ffmpeg-lib`
 with `FFMPEG_DIR` pointing at its output (default `desktop/build/ffmpeg`). Without the feature the
