@@ -14,7 +14,7 @@ const TEXT = {
     receivers: "接收端", what: "投什么", screen: "整个屏幕", window: "某个窗口",
     empty_title: "没有找到接收端", empty_body: "在电视或平板上打开映湾，开启“电脑投屏”；两者需在同一网络，Windows 防火墙要允许本程序访问专用网络。",
     password: "接收端密码", start: "开始投屏", stop: "停止投屏", change: "更改",
-    with_audio: "带声音", no_audio: "不带声音", no_windows: "没有可投的窗口", no_screens: "没有可投的屏幕", screen_n: "屏幕 {0}",
+    system_picker: "开始投屏时，系统会询问要共享哪个屏幕或窗口。", with_audio: "带声音", no_audio: "不带声音", no_windows: "没有可投的窗口", no_screens: "没有可投的屏幕", screen_n: "屏幕 {0}",
     pair_open: "无需配对", pair_ask: "需要在接收端确认", pair_pin: "首次需要配对码", paired: "已配对", needs_password: "需要密码",
     pick_receiver: "请先选一个接收端", pick_source: "请先选一个窗口",
     connecting: "正在连接…", needs_code: "需要配对", casting: "正在投屏", reconnecting: "连接中断，正在重连…",
@@ -49,7 +49,7 @@ const TEXT = {
     receivers: "Receivers", what: "What to cast", screen: "A screen", window: "A window",
     empty_title: "No receiver found", empty_body: "Open CastBay on the TV or tablet and turn on Desktop casting. Both must be on the same network, and the Windows firewall must allow this app on private networks.",
     password: "Receiver password", start: "Start casting", stop: "Stop casting", change: "Change",
-    with_audio: "with sound", no_audio: "no sound", no_windows: "No window to cast", no_screens: "No screen to cast", screen_n: "Screen {0}",
+    system_picker: "When you start, the system asks which screen or window to share.", with_audio: "with sound", no_audio: "no sound", no_windows: "No window to cast", no_screens: "No screen to cast", screen_n: "Screen {0}",
     pair_open: "No pairing needed", pair_ask: "Asks for approval on the receiver", pair_pin: "Needs a code the first time", paired: "Paired", needs_password: "Needs a password",
     pick_receiver: "Pick a receiver first", pick_source: "Pick a window first",
     connecting: "Connecting…", needs_code: "Pairing needed", casting: "Casting", reconnecting: "Connection lost, reconnecting…",
@@ -84,7 +84,7 @@ let settings = {};
 let receivers = [];
 let paired = [];
 let selected = null;
-let sources = { monitors: [], windows: [] };
+let sources = { monitors: [], windows: [], system_picker: false };
 let view = "home";
 let casting = false;
 let castNote = { fps: 30, audio: true };
@@ -223,6 +223,8 @@ async function refreshReceivers() {
 function currentKind() { return settings.source_kind === "window" ? "window" : "monitor"; }
 
 function fillSources() {
+  document.querySelectorAll("#view-home .segmented, #source").forEach((n) => n.toggleAttribute("hidden", !!sources.system_picker));
+  $("system-picker-note").toggleAttribute("hidden", !sources.system_picker);
   const kind = currentKind();
   document.querySelectorAll("#view-home .segmented button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.kind === kind)));
   const select = $("source");
@@ -255,7 +257,7 @@ function renderSummary() {
 // ---------------------------------------------------------------- casting
 function startCast() {
   if (!selected) { nudge(t("pick_receiver")); return; }
-  const kind = currentKind();
+  const kind = sources.system_picker ? "monitor" : currentKind();
   const value = $("source").value;
   if (kind === "window" && !value) { nudge(t("pick_source")); return; }
   showError("");

@@ -106,3 +106,5 @@ dt { color: var(--muted); font-size: 12px; } dd { margin: 0; font-size: 18px; fo
 body:not([data-view="home"]) #update { display: none !important; }
 .note + .list, .note + .row { margin-top: 12px; }
 [hidden] { display: none !important; }
+
+[hidden] { display: none !important; }

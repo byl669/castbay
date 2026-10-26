@@ -85,6 +85,8 @@ struct ReceiverView {
 struct Sources {
     monitors: Vec<String>,
     windows: Vec<String>,
+    /// The system asks the person what to share (Wayland), so there is nothing to pick here.
+    system_picker: bool,
 }
 
 #[derive(Deserialize)]
@@ -130,6 +132,7 @@ fn sources() -> Result<Sources, String> {
     Ok(Sources {
         monitors: castbay_capture::monitors().map_err(|e| e.to_string())?,
         windows: castbay_capture::window_titles().map_err(|e| e.to_string())?,
+        system_picker: cfg!(not(windows)),
     })
 }
 
@@ -272,7 +275,24 @@ fn open_release(url: String) -> Result<(), String> {
     if !url.starts_with("https://github.com/weenas/castbay/releases/") || url.chars().any(|c| c.is_control() || c == '"' || c == ' ') {
         return Err("not a release page of this project".into());
     }
-    std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).spawn().map_err(|e| e.to_string())?;
+    open_with_system(&url)
+}
+
+/// Hands a web address or folder to whatever the system opens it with.
+fn open_with_system(target: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    let mut command = {
+        let mut c = std::process::Command::new("rundll32");
+        c.args(["url.dll,FileProtocolHandler", target]);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(target);
+        c
+    };
+    command.spawn().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -281,8 +301,7 @@ fn open_release(url: String) -> Result<(), String> {
 fn open_logs(app: AppHandle) -> Result<(), String> {
     let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    std::process::Command::new("explorer").arg(&dir).spawn().map_err(|e| e.to_string())?;
-    Ok(())
+    open_with_system(&dir.to_string_lossy())
 }
 
 #[tauri::command]
@@ -304,7 +323,11 @@ fn chinese() -> bool {
     }
     #[cfg(not(windows))]
     {
-        false
+        ["LC_ALL", "LC_MESSAGES", "LANG"]
+            .iter()
+            .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+            .map(|v| v.starts_with("zh"))
+            .unwrap_or(false)
     }
 }
 
@@ -332,39 +355,81 @@ fn quit(app: &AppHandle) {
     });
 }
 
-const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
-const RUN_VALUE: &str = "CastBayDesktop";
+#[cfg(windows)]
+mod autostart {
+    const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+    const RUN_VALUE: &str = "CastBayDesktop";
 
-fn reg(args: &[&str]) -> std::io::Result<std::process::ExitStatus> {
-    let mut command = std::process::Command::new("reg");
-    command.args(args);
-    #[cfg(windows)]
-    {
+    fn reg(args: &[&str]) -> std::io::Result<std::process::ExitStatus> {
         use std::os::windows::process::CommandExt;
+        let mut command = std::process::Command::new("reg");
+        command.args(args);
         command.creation_flags(0x0800_0000); // no console window
+        command.output().map(|o| o.status)
     }
-    command.output().map(|o| o.status)
+
+    pub fn get() -> bool {
+        reg(&["query", RUN_KEY, "/v", RUN_VALUE]).map(|s| s.success()).unwrap_or(false)
+    }
+
+    pub fn set(on: bool) -> Result<(), String> {
+        if on {
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let value = format!("\"{}\" --minimized", exe.display());
+            let ok = reg(&["add", RUN_KEY, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", &value, "/f"]).map_err(|e| e.to_string())?.success();
+            if !ok {
+                return Err("could not write the startup entry".into());
+            }
+        } else {
+            let _ = reg(&["delete", RUN_KEY, "/v", RUN_VALUE, "/f"]);
+        }
+        Ok(())
+    }
 }
 
-/// Whether the program starts with Windows (for the window's switch).
+#[cfg(not(windows))]
+mod autostart {
+    use std::path::PathBuf;
+
+    fn entry() -> Result<PathBuf, String> {
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+            .ok_or("no home folder")?;
+        Ok(base.join("autostart").join("castbay-desktop.desktop"))
+    }
+
+    pub fn get() -> bool {
+        entry().map(|p| p.exists()).unwrap_or(false)
+    }
+
+    pub fn set(on: bool) -> Result<(), String> {
+        let path = entry()?;
+        if on {
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let text = format!(
+                "[Desktop Entry]\nType=Application\nName=CastBay Desktop\nExec=\"{}\" --minimized\nX-GNOME-Autostart-enabled=true\n",
+                exe.display()
+            );
+            std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+            std::fs::write(&path, text).map_err(|e| e.to_string())?;
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+        Ok(())
+    }
+}
+
+/// Whether the program starts with the computer (for the window's switch).
 #[tauri::command]
 fn autostart_get() -> bool {
-    reg(&["query", RUN_KEY, "/v", RUN_VALUE]).map(|s| s.success()).unwrap_or(false)
+    autostart::get()
 }
 
-/// Starts the program with Windows, minimised into the tray, or stops doing so.
+/// Starts the program with the computer, minimised into the tray, or stops doing so.
 #[tauri::command]
 fn autostart_set(on: bool, app: AppHandle) -> Result<(), String> {
-    if on {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let value = format!("\"{}\" --minimized", exe.display());
-        let ok = reg(&["add", RUN_KEY, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", &value, "/f"]).map_err(|e| e.to_string())?.success();
-        if !ok {
-            return Err("could not write the startup entry".into());
-        }
-    } else {
-        let _ = reg(&["delete", RUN_KEY, "/v", RUN_VALUE, "/f"]);
-    }
+    autostart::set(on)?;
     log(&app, &format!("autostart {}", if on { "on" } else { "off" }));
     Ok(())
 }
