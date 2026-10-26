@@ -136,7 +136,8 @@ pub fn windows() -> Result<Vec<String>, Error> {
         .filter(|w| w.is_valid())
         .filter_map(|w| w.title().ok())
         .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
+        // Console windows are titled with their program's path, and the input method has a window of its own.
+        .filter(|t| !t.is_empty() && !t.to_lowercase().ends_with(".exe") && t != "Windows 输入体验" && t != "Program Manager")
         .collect();
     titles.sort();
     titles.dedup();
