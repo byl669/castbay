@@ -522,6 +522,7 @@ dependencies = [
  "castbay-encode",
  "castbay-link",
  "tokio",
+ "windows 0.61.3",
 ]
 
 [[package]]

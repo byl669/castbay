@@ -247,7 +247,7 @@ pub async fn connect(
         }
     }
     if !id.is_empty() {
-        pins.pin(&id, &receiver_fp)?;
+        pins.pin(&id, &receiver_fp, &receiver_name)?;
     }
 
     let mut offer = json!({"t": "offer", "codec": "h264", "width": config.width, "height": config.height,

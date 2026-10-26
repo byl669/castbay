@@ -53,10 +53,56 @@ let selected = null;
 let sources = { monitors: [], windows: [] };
 let casting = false;
 
-const store = {
-  get(key, fallback) { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } },
-  set(key, value) { try { localStorage.setItem(key, value); } catch {} },
+// The person's choices live in settings.json on the Rust side; `settings` is this page's copy, and
+// `store` reads and writes it under the names the page has always used.
+let settings = {};
+const SETTING_KEYS = {
+  receiver: "last_receiver", kind: "source_kind", "source-monitor": "source_monitor", "source-window": "source_window",
+  quality: "quality", encoder: "encoder", audio: "send_audio", "welcome-done": "welcome_done",
 };
+const FLAGS = ["send_audio", "welcome_done"];
+const store = {
+  get(key, fallback) {
+    const field = SETTING_KEYS[key];
+    if (!field) return fallback;
+    const value = settings[field];
+    if (typeof value === "boolean") return value ? "1" : key === "welcome-done" ? "" : "0";
+    return value === undefined || value === "" ? fallback : value;
+  },
+  set(key, value) {
+    const field = SETTING_KEYS[key];
+    if (!field) return;
+    const stored = FLAGS.includes(field) ? value === "1" : value;
+    settings[field] = stored;
+    invoke("set_settings", { patch: { [field]: stored } }).then((s) => { settings = s; }).catch(() => {});
+  },
+};
+
+// Loads the settings; the first time after an update from a version that kept them in the page's own
+// storage, copies those over.
+let settingsLoading = null;
+function loadSettings() {
+  return (settingsLoading ??= readSettings());
+}
+
+async function readSettings() {
+  settings = await invoke("get_settings");
+  if (settings.migrated) return;
+  const patch = { migrated: true };
+  try {
+    const old = (k) => localStorage.getItem(k);
+    if (old("quality")) patch.quality = old("quality");
+    if (old("encoder")) patch.encoder = old("encoder");
+    if (old("audio") !== null) patch.send_audio = old("audio") === "1";
+    if (old("welcome-done") === "1") patch.welcome_done = true;
+    if (old("receiver")) patch.last_receiver = old("receiver");
+    if (old("kind")) patch.source_kind = old("kind");
+    if (old("source-monitor")) patch.source_monitor = old("source-monitor");
+    if (old("source-window")) patch.source_window = old("source-window");
+  } catch {}
+  try { settings = await invoke("set_settings", { patch }); }
+  catch { settings = await invoke("set_settings", { patch: { migrated: true } }); }
+}
 
 let failedReceiverId = null;
 
@@ -190,7 +236,7 @@ $("start").addEventListener("click", async () => {
       args: {
         id: selected.id, ip: selected.ip, port: selected.port,
         password: selected.password ? $("password").value : null,
-        kind, value: $("source").value, quality: $("quality").value, encoder: $("encoder").value, audio: $("audio").checked,
+        kind, value: $("source").value,
       },
     });
     showSession(true);
@@ -210,17 +256,19 @@ $("forget").addEventListener("click", async () => { if (failedReceiverId) { awai
 $("logs").addEventListener("click", () => invoke("open_logs").catch((e) => showError(String(e))));
 $("stop").addEventListener("click", () => invoke("stop_cast"));
 
+loadSettings().then(() => {
 {
-  const kind = store.get("kind", "monitor");
-  const radio = document.querySelector(`input[name="kind"][value="${kind}"]`);
-  if (radio) radio.checked = true;
-  $("quality").value = store.get("quality", "balanced");
-  $("encoder").value = store.get("encoder", "auto");
-  $("audio").checked = store.get("audio", "1") === "1";
-}
-refreshSources();
-refreshReceivers();
-setInterval(() => { if (!casting) refreshReceivers(); }, 15000);
+    const kind = store.get("kind", "monitor");
+    const radio = document.querySelector(`input[name="kind"][value="${kind}"]`);
+    if (radio) radio.checked = true;
+    $("quality").value = store.get("quality", "balanced");
+    $("encoder").value = store.get("encoder", "auto");
+    $("audio").checked = store.get("audio", "1") === "1";
+  }
+  refreshSources();
+  refreshReceivers();
+  setInterval(() => { if (!casting) refreshReceivers(); }, 15000);
+});
 
 // Tells the person when a newer release exists. A development build (0.0.0) and a network that
 // cannot reach GitHub stay quiet.
@@ -247,10 +295,12 @@ function newer(a, b) {
 })();
 
 // First run: a few lines on what to set up, until dismissed.
-if (store.get("welcome-done", "") !== "1") {
-  $("welcome").hidden = false;
-  $("welcome-ok").addEventListener("click", () => { store.set("welcome-done", "1"); $("welcome").hidden = true; });
-}
+loadSettings().then(() => {
+  if (store.get("welcome-done", "") !== "1") {
+    $("welcome").hidden = false;
+    $("welcome-ok").addEventListener("click", () => { store.set("welcome-done", "1"); $("welcome").hidden = true; });
+  }
+});
 
 // Starting with Windows is a setting of the system, so it is read from there.
 invoke("autostart_get").then((on) => { $("autostart").checked = on; }).catch(() => {});
