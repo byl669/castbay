@@ -24,6 +24,9 @@ pub struct Options {
     pub target: Target,
     pub fps: u32,
     pub bitrate_bps: u32,
+    /// The largest picture sent: a bigger screen is scaled down to fit (and a window that changes
+    /// size is fitted into the size the cast started with, with black bars).
+    pub max_size: (u32, u32),
     /// The encoder to use; None picks the first that works: AMD, NVIDIA, then x264 on the CPU.
     pub codec: Option<Codec>,
     /// Where the identity and the pinned receivers live.

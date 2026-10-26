@@ -162,6 +162,7 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>) -> Res
         bitrate_bps,
         codec,
         audio: args.audio,
+        max_size: (1920, 1080),
         data_dir,
         max_duration: None,
     };

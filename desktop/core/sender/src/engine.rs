@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 
 use castbay_capture::Target;
 use castbay_encode::ffmpeg::{Codec, FfmpegEncoder};
-use castbay_encode::{bgra_to_nv12, Config, Encoded};
+use castbay_encode::scale::{bgra_to_nv12_fit, fit_size};
+use castbay_encode::{Config, Encoded};
 use castbay_link::{Event, SendResult, Session};
 
 use crate::{Failure, OnStatus, Options, Report, Status};
@@ -209,7 +210,7 @@ pub fn run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> O
 }
 
 fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, done: std::sync::mpsc::Sender<Result<Report, Failure>>) -> Result<(), Failure> {
-    let Options { addr, receiver_id, name, password, target, fps, bitrate_bps, codec, audio, data_dir, max_duration } = options;
+    let Options { addr, receiver_id, name, password, target, fps, bitrate_bps, codec, audio, max_size, data_dir, max_duration } = options;
     on_status(Status::Connecting);
     let runtime = tokio::runtime::Runtime::new().map_err(|e| Failure::new("other", e.to_string()))?;
 
@@ -226,8 +227,8 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
     }
     let waited = Instant::now();
     let (width, height) = loop {
-        if let Some(size) = *first.lock().unwrap() {
-            break size;
+        if let Some((w, h)) = *first.lock().unwrap() {
+            break fit_size(w, h, max_size.0, max_size.1);
         }
         if stop.load(Ordering::SeqCst) {
             return Err(Failure::new("stopped", "stopped"));
@@ -438,10 +439,9 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
             }
             st.frames_seen += 1;
             if st.last.elapsed() + interval / 4 >= interval || !st.have_picture {
-                let (w, h) = ((frame.width & !1) as usize, (frame.height & !1) as usize);
-                if (w as u32, h as u32) == (width, height) {
+                if frame.width >= 2 && frame.height >= 2 {
                     let mut nv12 = std::mem::take(&mut st.nv12);
-                    bgra_to_nv12(frame.data, frame.stride, w, h, &mut nv12);
+                    bgra_to_nv12_fit(frame.data, frame.stride, frame.width as usize, frame.height as usize, width as usize, height as usize, &mut nv12);
                     st.nv12 = nv12;
                     st.have_picture = true;
                     st.frames_taken += 1;
