@@ -21,6 +21,10 @@ class AirPlayManager private constructor(private val context: Context) {
          * It stays when the sender disconnects: iPhones do, to ask for it, then connect again.
          */
         private const val PIN_VISIBLE_MS = 60_000L
+        /** The advertiser tries again for about 25 s on its own; after this the person is told. */
+        private const val STARTUP_TIMEOUT_MS = 30_000L
+        private const val AUTO_RETRY_MAX = 3
+        private const val AUTO_RETRY_DELAY_MS = 15_000L
         private const val HEARTBEAT_CHECK_MS = 1000L
         /** A heartbeat gap longer than this is written to the log and the diagnostics. */
         private const val HEARTBEAT_GAP_NOTE_MS = 3000L
@@ -445,6 +449,8 @@ class AirPlayManager private constructor(private val context: Context) {
                 records = nativeBridge.discoveryRecords() ?: DiscoveryRecords.FALLBACK,
                 onReady = {
                     Log.i(TAG, "AirPlay discovery records are visible on the local network")
+                    mainHandler.removeCallbacks(startupWatchdog)
+                    autoRetries = 0
                     if (currentState == AirPlayConnectionState.Registering) {
                         currentState = if (protocolPort > 0) {
                             AirPlayConnectionState.Discovering
@@ -460,6 +466,8 @@ class AirPlayManager private constructor(private val context: Context) {
             return false
         }
         currentState = AirPlayConnectionState.Registering
+        mainHandler.removeCallbacks(startupWatchdog)
+        mainHandler.postDelayed(startupWatchdog, STARTUP_TIMEOUT_MS)
         // DLNA (video apps' own cast buttons, e.g. Bilibili's) runs beside AirPlay.
         if (settings.dlnaEnabled) Thread({ dlna.start(settings.advertisedName, dlnaTarget) }, "DLNA-start").start()
         // CastBay Desktop: computers casting over CastBay Link.
@@ -517,6 +525,8 @@ class AirPlayManager private constructor(private val context: Context) {
 
     fun stop() {
         Log.d(TAG, "Stopping AirPlay server")
+        mainHandler.removeCallbacks(startupWatchdog)
+        mainHandler.removeCallbacks(autoRetry)
         nativeBridge.stop()
         hidePairingPin()
         discoveryAdvertiser.stop()
@@ -596,6 +606,35 @@ class AirPlayManager private constructor(private val context: Context) {
         hlsPlayer.stop()
         currentError = error
         currentState = AirPlayConnectionState.Error
+        scheduleAutoRetry()
+    }
+
+    /**
+     * Starting must not hang: the advertiser retries by itself, and if discovery is still not up
+     * after [STARTUP_TIMEOUT_MS] the person gets an error with Retry instead of "Starting…" for ever.
+     */
+    private val startupWatchdog = Runnable {
+        if (currentState == AirPlayConnectionState.Registering) {
+            com.weenas.castbay.util.Diagnostics.record("startup", "Local network discovery was not ready after ${STARTUP_TIMEOUT_MS / 1000} s")
+            onNativeError(context.getString(com.weenas.castbay.R.string.error_discovery_timeout))
+        }
+    }
+
+    private var autoRetries = 0
+
+    /** A TV nobody is watching (a car, a living room) starts again by itself, a few times, with growing waits. */
+    private val autoRetry = Runnable {
+        if (currentState != AirPlayConnectionState.Error || autoRetries >= AUTO_RETRY_MAX) return@Runnable
+        autoRetries++
+        com.weenas.castbay.util.Diagnostics.record("startup", "Starting again by itself ($autoRetries of $AUTO_RETRY_MAX)")
+        Log.i(TAG, "Starting the receiver again after an error ($autoRetries of $AUTO_RETRY_MAX)")
+        stop()
+        start(activeSettings)
+    }
+
+    private fun scheduleAutoRetry() {
+        mainHandler.removeCallbacks(autoRetry)
+        if (autoRetries < AUTO_RETRY_MAX) mainHandler.postDelayed(autoRetry, AUTO_RETRY_DELAY_MS * (autoRetries + 1))
     }
 
     fun setVideoSurface(surface: Surface?) {

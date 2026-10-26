@@ -247,6 +247,7 @@
     <string name="notification_discoverable_only">Discoverable only — streaming unavailable</string>
 
     <!-- Errors shown on the waiting screen -->
+    <string name="error_discovery_timeout">Local network discovery did not start in time</string>
     <string name="error_discovery">Could not start local network discovery</string>
     <string name="error_video_unreachable">Couldn\'t reach the video server. The TV must be able to access the video site directly.</string>
     <string name="error_video_refused">The video server refused the request.</string>

@@ -249,6 +249,7 @@
     <string name="notification_discoverable_only">仅可被发现，暂不支持投屏</string>
 
     <!-- Errors shown on the waiting screen -->
+    <string name="error_discovery_timeout">局域网发现没能及时启动</string>
     <string name="error_discovery">无法启动局域网发现服务</string>
     <string name="error_video_unreachable">无法连接视频服务器。电视需要能直接访问该视频网站。</string>
     <string name="error_video_refused">视频服务器拒绝了请求。</string>
