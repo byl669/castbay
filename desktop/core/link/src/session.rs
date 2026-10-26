@@ -166,6 +166,8 @@ fn reason(message: &Value) -> String {
 /// out of [`Session::next_event`].
 pub struct Session {
     frames: mpsc::Sender<Vec<u8>>,
+    /// Audio has a queue of its own, so it neither waits behind video nor makes video drop frames.
+    audio: mpsc::Sender<Vec<u8>>,
     events: mpsc::UnboundedReceiver<Event>,
     dropping: Arc<AtomicBool>,
     closed: Arc<AtomicBool>,
@@ -268,21 +270,35 @@ pub async fn connect(
     }
 
     let (frames, queue) = mpsc::channel::<Vec<u8>>(QUEUE_FRAMES);
+    let (audio, audio_queue) = mpsc::channel::<Vec<u8>>(AUDIO_QUEUE_FRAMES);
     let (events_tx, events) = mpsc::unbounded_channel();
     let dropping = Arc::new(AtomicBool::new(false));
     let closed = Arc::new(AtomicBool::new(false));
-    let writer_task = tokio::spawn(write_loop(writer, queue, closed.clone()));
+    let writer_task = tokio::spawn(write_loop(writer, queue, audio_queue, closed.clone()));
     let reader_task = tokio::spawn(read_loop(reader, events_tx, closed.clone()));
-    Ok(Session { frames, events, dropping, closed, writer: writer_task, reader: reader_task, receiver_id: id, receiver_name, audio_accepted })
+    Ok(Session { frames, audio, events, dropping, closed, writer: writer_task, reader: reader_task, receiver_id: id, receiver_name, audio_accepted })
 }
 
 /// Pictures waiting to be written; more than this and the connection is not keeping up.
 const QUEUE_FRAMES: usize = 6;
 
-async fn write_loop(mut writer: Writer, mut queue: mpsc::Receiver<Vec<u8>>, closed: Arc<AtomicBool>) {
+/// AAC frames waiting to be written (about 21 ms each): well under a second, then the oldest news is dropped.
+const AUDIO_QUEUE_FRAMES: usize = 32;
+
+async fn write_loop(mut writer: Writer, mut queue: mpsc::Receiver<Vec<u8>>, mut audio: mpsc::Receiver<Vec<u8>>, closed: Arc<AtomicBool>) {
     let mut ping = tokio::time::interval(Duration::from_secs(2));
+    let mut audio_open = true;
     loop {
         tokio::select! {
+            biased;
+            frame = audio.recv(), if audio_open => match frame {
+                Some(bytes) => {
+                    if writer.write_all(&bytes).await.is_err() {
+                        break;
+                    }
+                }
+                None => audio_open = false,
+            },
             frame = queue.recv() => match frame {
                 Some(bytes) => {
                     if writer.write_all(&bytes).await.is_err() {
@@ -357,7 +373,7 @@ impl Session {
     /// behind, the frame is simply lost (a short gap beats a growing delay).
     pub fn send_audio(&self, pts_us: u64, frame: &[u8]) {
         if self.audio_accepted && !self.closed.load(Ordering::SeqCst) {
-            let _ = self.frames.try_send(audio_frame(pts_us, frame));
+            let _ = self.audio.try_send(audio_frame(pts_us, frame));
         }
     }
 
