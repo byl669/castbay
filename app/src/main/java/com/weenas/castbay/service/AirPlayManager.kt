@@ -22,6 +22,8 @@ class AirPlayManager private constructor(private val context: Context) {
          */
         private const val PIN_VISIBLE_MS = 60_000L
         private const val HEARTBEAT_CHECK_MS = 1000L
+        /** A heartbeat gap longer than this is written to the log and the diagnostics. */
+        private const val HEARTBEAT_GAP_NOTE_MS = 3000L
         /** Two heartbeats missed (they come every two seconds; the TCL's gaps stayed under 2.6 s). */
         private const val HEARTBEAT_TIMEOUT_MS = 5000L
         /**
@@ -673,7 +675,15 @@ class AirPlayManager private constructor(private val context: Context) {
 
     private fun onSenderHeartbeat() {
         val first = lastHeartbeatAtMs == 0L
-        lastHeartbeatAtMs = android.os.SystemClock.elapsedRealtime()
+        val now = android.os.SystemClock.elapsedRealtime()
+        val gap = now - lastHeartbeatAtMs
+        lastHeartbeatAtMs = now
+        // A long quiet spell that ended on its own: what the TV's own Wi-Fi and the audio were doing.
+        if (!first && gap > HEARTBEAT_GAP_NOTE_MS) {
+            val audio = if (lastAudioAtMs == 0L) "no audio" else "audio last arrived ${now - lastAudioAtMs} ms ago"
+            Log.i(TAG, "Heartbeat came back after $gap ms ($audio; ${wifiSummary()})")
+            com.weenas.castbay.util.Diagnostics.record("heartbeat", "Came back after $gap ms ($audio; ${wifiSummary()})")
+        }
         if (first) mainHandler.post {
             mainHandler.removeCallbacks(heartbeatWatchdog)
             mainHandler.postDelayed(heartbeatWatchdog, HEARTBEAT_CHECK_MS)
@@ -702,13 +712,23 @@ class AirPlayManager private constructor(private val context: Context) {
                 else -> HEARTBEAT_TIMEOUT_MS
             }
             if (watched && silentMs > limit) {
-                Log.i(TAG, "No heartbeat from the AirPlay sender for $silentMs ms: it has gone")
+                val audio = if (lastAudioAtMs == 0L) "no audio" else "audio last arrived ${now - lastAudioAtMs} ms ago"
+                Log.i(TAG, "No heartbeat from the AirPlay sender for $silentMs ms: it has gone ($audio; ${wifiSummary()})")
+                com.weenas.castbay.util.Diagnostics.record("heartbeat", "Gone after $silentMs ms ($audio; ${wifiSummary()})")
                 endCasting()
                 return
             }
             mainHandler.postDelayed(this, HEARTBEAT_CHECK_MS)
         }
     }
+
+    /** The TV's own Wi-Fi: the access point it is on and how strong, to tell its roaming from the phone's. */
+    @Suppress("DEPRECATION")
+    private fun wifiSummary(): String = runCatching {
+        val manager = context.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+        val info = manager.connectionInfo
+        "TV Wi-Fi ${info.bssid} ${info.rssi} dBm ${info.linkSpeed} Mbps"
+    }.getOrDefault("TV Wi-Fi unknown")
 
     /** A "stats for nerds" snapshot of the current stream. Main thread; null when idle. */
     fun playbackStats(): PlaybackStats? {
