@@ -364,7 +364,13 @@ fn cast(args: &[String]) {
         repeats: u64,
         bytes: u64,
         failed: bool,
+        /// The receiver ended the cast on purpose.
         ended: Option<String>,
+        /// The connection broke; the reconnect thread is getting a new one.
+        lost: Option<String>,
+        /// The receiver asked for a key frame.
+        want_key: bool,
+        reconnects: u64,
         last_stats: Option<(i64, u64, f64)>,
     }
     let started = Instant::now();
@@ -382,6 +388,9 @@ fn cast(args: &[String]) {
         repeats: 0,
         bytes: 0,
         failed: false,
+        lost: None,
+        want_key: false,
+        reconnects: 0,
         ended: None,
         last_stats: None,
     }));
@@ -415,6 +424,9 @@ fn cast(args: &[String]) {
 
     // Pushes the current picture into the encoder and sends what came out.
     fn push(st: &mut State, link: &castbay_link::Session, captured: Instant, started: Instant, config: &Config, codec: Codec, repeat: bool) {
+        if st.lost.is_some() {
+            return;
+        }
         if st.encoder.is_none() {
             match Enc::new(config, codec) {
                 Ok(e) => st.encoder = Some(e),
@@ -427,7 +439,8 @@ fn cast(args: &[String]) {
         }
         let pts = captured.duration_since(started).as_micros() as i64;
         let nv12 = std::mem::take(&mut st.nv12);
-        let result = st.encoder.as_mut().unwrap().encode(&nv12, pts, link.wants_key_frame());
+        let result = st.encoder.as_mut().unwrap().encode(&nv12, pts, link.wants_key_frame() || st.want_key);
+        st.want_key = false;
         st.nv12 = nv12;
         st.captured.push_back(captured);
         st.last = Instant::now();
@@ -444,7 +457,9 @@ fn cast(args: &[String]) {
                     match link.send_video(unit.pts_us as u64, unit.key, &unit.data) {
                         SendResult::Sent => st.sent += 1,
                         SendResult::Dropped => st.dropped += 1,
-                        SendResult::Closed => st.failed = true,
+                        SendResult::Closed => {
+                            st.lost.get_or_insert_with(|| "connection lost".into());
+                        }
                     }
                 }
             }
@@ -473,6 +488,60 @@ fn cast(args: &[String]) {
         })
     };
 
+    // A broken connection is replaced by a new one (the pairing is remembered, so no code is
+    // needed); the encoder starts over, which begins the new stream with a key frame.
+    let reconnector = {
+        let (state, session_ref, handle) = (state.clone(), session_ref.clone(), runtime.handle().clone());
+        std::thread::spawn(move || {
+            let mut pins = pins;
+            loop {
+                std::thread::sleep(Duration::from_millis(200));
+                let reason = {
+                    let st = state.lock().unwrap();
+                    if st.failed || st.ended.is_some() || started.elapsed() > Duration::from_secs(seconds) + Duration::from_secs(1) {
+                        return;
+                    }
+                    match &st.lost {
+                        Some(reason) => reason.clone(),
+                        None => continue,
+                    }
+                };
+                if let Some(old) = session_ref.lock().unwrap().take() {
+                    handle.block_on(old.close());
+                }
+                println!("connection lost ({reason}); reconnecting");
+                let mut none = |_: &str| -> Option<String> { None };
+                let mut renewed = None;
+                for wait in [1u64, 2, 3, 5, 5, 5, 5, 5, 5, 5] {
+                    std::thread::sleep(Duration::from_secs(wait));
+                    if started.elapsed() > Duration::from_secs(seconds) {
+                        break;
+                    }
+                    match handle.block_on(castbay_link::connect(addr, &identity, &mut pins, receiver_id.as_deref(), &config, &mut none)) {
+                        Ok(session) => {
+                            renewed = Some(session);
+                            break;
+                        }
+                        Err(e) => eprintln!("reconnect failed: {e}"),
+                    }
+                }
+                let mut st = state.lock().unwrap();
+                match renewed {
+                    Some(session) => {
+                        *session_ref.lock().unwrap() = Some(session);
+                        st.encoder = None;
+                        st.captured.clear();
+                        st.lost = None;
+                        st.want_key = true;
+                        st.reconnects += 1;
+                        println!("reconnected");
+                    }
+                    None => st.failed = true,
+                }
+            }
+        })
+    };
+
     // Capture ends only when a picture arrives: a locked or switched-off screen delivers none.
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(seconds + 4));
@@ -487,9 +556,12 @@ fn cast(args: &[String]) {
         if let Some(link) = shared_session.lock().unwrap().as_mut() {
             while let Some(event) = link.next_event() {
                 match event {
-                    Event::Closed(reason) => st.ended = Some(reason),
+                    Event::Closed(reason) if matches!(reason.as_str(), "stopped_by_receiver" | "replaced" | "receiver_stopped") => st.ended = Some(reason),
+                    Event::Closed(reason) => {
+                        st.lost.get_or_insert(reason);
+                    }
                     Event::Stats { decode_ms, dropped, fps } => st.last_stats = Some((decode_ms, dropped, fps)),
-                    Event::KeyFrameRequested => {}
+                    Event::KeyFrameRequested => st.want_key = true,
                 }
             }
         }
@@ -511,6 +583,7 @@ fn cast(args: &[String]) {
         frame.timestamp < limit && !st.failed
     });
     let _ = repeater.join();
+    let _ = reconnector.join();
     if let Some(link) = session_ref.lock().unwrap().take() {
         runtime.block_on(link.close());
     }
@@ -521,6 +594,9 @@ fn cast(args: &[String]) {
         "units sent: {} ({} dropped, {} repeated pictures), {:.2} Mbit/s, {:.1} fps",
         st.sent, st.dropped, st.repeats, st.bytes as f64 * 8.0 / elapsed / 1e6, st.sent as f64 / elapsed
     );
+    if st.reconnects > 0 {
+        println!("reconnected {} time(s)", st.reconnects);
+    }
     if let Some((decode_ms, dropped, fps)) = st.last_stats {
         println!("receiver reports: decode {decode_ms} ms, {dropped} dropped, {fps:.1} fps");
     }
