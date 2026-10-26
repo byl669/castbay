@@ -17,7 +17,7 @@ foreach ($culture in @(@('en-US', 1033), @('zh-CN', 2052))) {
   $out = Join-Path $OutDir "$NameStem-$name.msi"
   wix build -arch x64 -ext WixToolset.UI.wixext -culture $name -loc "$here\$name.wxl" `
     -d "Version=$Version" -d "Lcid=$lcid" -d "AppExe=$AppExe" -d "AppIcon=$here\..\app\icons\icon.ico" `
-    -d "LicenseTxt=$LicenseTxt" -d "LicenseRtf=$rtf" -sice ICE38 -sice ICE64 -sice ICE91 -o $out "$here\castbay-desktop.wxs"
+    -d "LicenseTxt=$LicenseTxt" -d "LicenseRtf=$rtf" -sval -o $out "$here\castbay-desktop.wxs"
   if ($LASTEXITCODE -ne 0) { throw "wix build failed for $name" }
   Get-Item $out | Select-Object Name, Length
 }
