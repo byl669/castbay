@@ -4,7 +4,7 @@ const { listen } = window.__TAURI__.event;
 const zh = {
   title: "映湾桌面端", subtitle: "把这台电脑的屏幕或某个窗口投到映湾接收端。",
   receivers: "接收端", refresh: "刷新",
-  none_found: "没有找到接收端。请在电视或平板上打开映湾，并在设置里开启“映湾桌面投屏”；两者需在同一网络。",
+  none_found: "没有找到接收端。请在电视或平板上打开映湾，并在设置里开启“电脑投屏”；两者需在同一网络，Windows 防火墙需允许本程序访问专用网络。",
   password: "接收端密码", what: "投什么", screen: "整个屏幕", window: "某个窗口",
   quality: "画质", q_balanced: "均衡（30 帧，8 Mbit/s）", q_smooth: "流畅（60 帧，10 Mbit/s）", q_saver: "省流（30 帧，4 Mbit/s）",
   encoder: "编码器", e_auto: "自动", e_cpu: "CPU（x264）", start: "开始投屏", stop: "停止投屏",
@@ -14,6 +14,9 @@ const zh = {
   reconnecting: "连接中断，正在重连…", reconnected: "已重新连接",
   ended: "投屏已结束", ended_stopped_by_receiver: "接收端结束了投屏", ended_replaced: "接收端被另一台设备占用了",
   ended_receiver_stopped: "接收端已停止接收", ended_stopped: "投屏已停止",
+  w_title: "开始使用", w_1: "在电视或平板上打开映湾，在设置里开启“电脑投屏”。",
+  w_2: "如果 Windows 防火墙弹窗询问，请允许在专用网络上访问，否则找不到接收端。",
+  w_3: "在下面选择接收端并开始投屏。第一次连接时接收端会显示 6 位配对码，在这里输入即可。", w_ok: "知道了",
   update_open: "下载", update_text: "有新版本 {0} 可用", failed: "无法投屏：{0}", logs: "打开日志文件夹", forget: "忘记这个接收端",
   f_busy: "接收端正在被另一台设备使用。", f_blocked: "接收端屏蔽了这台电脑。请在接收端的“已知设备”里解除屏蔽。",
   f_approval_needed: "接收端需要有人在它的屏幕上点“允许”。请确认后重试。", f_locked: "配对尝试次数过多，接收端暂时锁定了配对，请一分钟后重试。",
@@ -28,6 +31,7 @@ const en = {
   ended_stopped_by_receiver: "The receiver ended the cast", ended_replaced: "Another device took over the receiver",
   ended_receiver_stopped: "The receiver stopped receiving", ended_stopped: "Casting stopped",
   connecting: "Connecting…", needs_code: "Pairing needed", reconnecting: "Connection lost, reconnecting…", reconnected: "Reconnected",
+  w_ok: "Got it",
   update_open: "Download", update_text: "Version {0} is available", ended: "Casting ended", failed: "Could not cast: {0}", logs: "Open log folder", forget: "Forget this receiver",
   f_busy: "The receiver is being used by another device.", f_blocked: "The receiver blocks this computer. Unblock it in the receiver's known devices.",
   f_approval_needed: "Someone has to tap Allow on the receiver's screen. Confirm there and try again.", f_locked: "Too many pairing attempts: the receiver paused pairing. Try again in a minute.",
@@ -236,3 +240,9 @@ function newer(a, b) {
     $("update").hidden = false;
   } catch {}
 })();
+
+// First run: a few lines on what to set up, until dismissed.
+if (store.get("welcome-done", "") !== "1") {
+  $("welcome").hidden = false;
+  $("welcome-ok").addEventListener("click", () => { store.set("welcome-done", "1"); $("welcome").hidden = true; });
+}

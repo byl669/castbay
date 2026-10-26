@@ -18,13 +18,23 @@
     <button id="update-open" class="link" data-i18n="update_open">Download</button>
   </div>
 
+  <section id="welcome" class="card" hidden>
+    <h2 data-i18n="w_title">Getting started</h2>
+    <ol>
+      <li data-i18n="w_1">On the TV or tablet, open CastBay and turn on "Desktop casting" in its settings.</li>
+      <li data-i18n="w_2">If Windows asks about the firewall, allow access on private networks. Otherwise receivers cannot be found.</li>
+      <li data-i18n="w_3">Pick the receiver below and start. The first time, the receiver shows a 6-digit code: type it here.</li>
+    </ol>
+    <button id="welcome-ok" class="primary" data-i18n="w_ok">Got it</button>
+  </section>
+
   <section id="setup">
     <div class="row head">
       <h2 data-i18n="receivers">Receivers</h2>
       <button id="refresh" class="link" data-i18n="refresh">Refresh</button>
     </div>
     <ul id="receiver-list" class="list" role="listbox"></ul>
-    <p id="receiver-empty" class="hint" hidden data-i18n="none_found">No receiver found. Open CastBay on the TV or tablet and turn on "CastBay Desktop" in its settings; both must be on the same network.</p>
+    <p id="receiver-empty" class="hint" hidden data-i18n="none_found">No receiver found. Open CastBay on the TV or tablet and turn on "Desktop casting" in its settings; both must be on the same network, and the Windows firewall must allow this app on private networks.</p>
     <label id="password-row" hidden>
       <span data-i18n="password">Receiver password</span>
       <input id="password" type="password" autocomplete="off">
