@@ -3,15 +3,15 @@ name: Desktop release
 # Push a tag like desktop-v0.1.0 to build CastBay Desktop for Windows and publish it as a
 # pre-release, with its source (the sources of the libraries it contains are the submodules
 # under desktop/third_party). Run by hand (Actions > Desktop release > Run workflow) it builds
-# the same zip and keeps it as a build artifact only (so does a pull request that changes this
-# file or the FFmpeg build script). `v*` tags are the Android release.
+# the same zip and installer and keeps them as build artifacts only (so does a pull request that
+# changes this file, the FFmpeg build script or the installer). `v*` tags are the Android release.
 on:
   push:
     tags: ['desktop-v*']
   workflow_dispatch:
   # A change to this file runs it too (as a build only), so it is tried before a tag needs it.
   pull_request:
-    paths: ['.github/workflows/desktop-release.yml', 'desktop/tools/build-ffmpeg.*']
+    paths: ['.github/workflows/desktop-release.yml', 'desktop/tools/build-ffmpeg.*', 'desktop/installer/**']
 
 # Reads the repository; the publishing job asks for more below.
 permissions:
@@ -84,7 +84,8 @@ jobs:
           {
             echo "CastBay Desktop $VERSION"
             echo
-            echo "Run \"CastBay Desktop.exe\". It needs the Microsoft Edge WebView2 runtime (part of"
+            echo "This is the portable version: run \"CastBay Desktop.exe\" (the -setup.exe next to this zip on the"
+            echo "release page installs it instead, with a Start menu entry and uninstaller). It needs the Microsoft Edge WebView2 runtime (part of"
             echo "Windows 11 and recent Windows 10). Windows may ask to let it use the network: allow it"
             echo "on private networks so receivers can be found. It is not code-signed yet, so SmartScreen"
             echo "may warn: choose More info, then Run anyway."
@@ -105,10 +106,34 @@ jobs:
             -czf "dist/CastBay-Desktop-$VERSION-source.tar.gz" desktop
           ls -la dist
 
+      # The installer: per-user, Start menu entry, Settings > Apps entry, upgrades in place.
+      - name: Get NSIS
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile "$env:RUNNER_TEMP\MicrosoftEdgeWebview2Setup.exe"
+          $appVersion = (Select-String -Path desktop\app\Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $setup = "$PWD\dist\CastBay-Desktop-$env:VERSION-windows-x64-setup.exe"
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /V2 "/DVERSION=$appVersion" "/DAPP_EXE=$PWD\desktop\target\release\castbay-desktop.exe" "/DWEBVIEW2_SETUP=$env:RUNNER_TEMP\MicrosoftEdgeWebview2Setup.exe" "/DLICENSE_FILE=$PWD\LICENSE" "/DOUTFILE=$setup" desktop\installer\castbay-desktop.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+          "APP_VERSION=$appVersion" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "SETUP=$setup" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          Get-Item $setup | Select-Object Name, Length
+
+      # Install, install over, start, uninstall on the runner, before anything is published.
+      - name: Try the installer
+        shell: pwsh
+        run: ./desktop/installer/test-install.ps1 -Setup $env:SETUP -Version $env:APP_VERSION
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: CastBay-Desktop-${{ env.VERSION }}
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
           retention-days: 14
 
       - name: Publish the release
@@ -117,7 +142,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
+            "dist/CastBay-Desktop-$VERSION-windows-x64-setup.exe" \
             "dist/CastBay-Desktop-$VERSION-windows-x64.zip" \
             "dist/CastBay-Desktop-$VERSION-source.tar.gz" \
             --title "CastBay Desktop $VERSION" --prerelease \
-            --notes "CastBay Desktop $VERSION for Windows 10/11 (64-bit): unzip and run \"CastBay Desktop.exe\". Casts a screen or window to CastBay receivers; turn on CastBay Desktop in the receiver's settings first."
+            --notes "CastBay Desktop $VERSION for Windows 10/11 (64-bit). Run the -setup.exe to install (no administrator rights needed), or unzip the .zip and run \"CastBay Desktop.exe\" without installing. Casts a screen or window, with sound, to CastBay receivers; turn on Desktop casting in the receiver's settings first. Not code-signed yet: if SmartScreen warns, choose More info, then Run anyway."

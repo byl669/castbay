@@ -16,15 +16,29 @@ AirPlay or DLNA, so the delay is low (about a quarter of a second on a home netw
 - Windows 10/11 64 位，带有 Edge WebView2 运行库（Windows 11 和较新的 Windows 10 已自带）。
 - 同一网络里运行映湾的设备（Android 6 及以上），并在它的设置里开启“电脑投屏”。
 
+## Install / 安装
+
+Two ways, same program. / 两种方式，程序是同一个。
+
+- **Installer** (`CastBay-Desktop-…-setup.exe`): double-click, next, finish. No administrator
+  rights needed. It adds a Start menu entry (and, if you tick it, a desktop shortcut) and an entry
+  in Settings > Apps for uninstalling. Running a newer installer updates in place and keeps your
+  pairings. It installs the WebView2 runtime too if the PC has none.
+- **Portable** (`CastBay-Desktop-…-windows-x64.zip`): unzip anywhere and run
+  **CastBay Desktop.exe**. Nothing is installed; delete the folder to remove it.
+- **安装包**（`-setup.exe`）：双击、下一步、完成，不需要管理员权限。它会添加开始菜单项（可选桌面快捷方式）
+  和“设置→应用”里的卸载入口；运行新版安装包会原地升级并保留配对记录；电脑没有 WebView2 时会一并装上。
+- **便携版**（`.zip`）：解压到任意位置，运行 **CastBay Desktop.exe**，不安装任何东西，删掉文件夹就卸载了。
+
 ## First time / 第一次使用
 
-1. Unzip the download and run **CastBay Desktop.exe**. It is not code-signed yet, so Windows
-   SmartScreen may say it protected your PC: choose **More info**, then **Run anyway**.
+1. Run the installer or the program. It is not code-signed yet, so Windows SmartScreen may say it
+   protected your PC: choose **More info**, then **Run anyway**.
 2. If the Windows firewall asks, allow **private networks**. Without it receivers cannot be found.
 3. Pick your receiver in the list, choose a screen or a window, and press **Start casting**.
 4. The first time, the receiver shows a 6-digit code: type it in the window. Later casts need no code.
 
-1. 解压后运行 **CastBay Desktop.exe**。目前还没有代码签名，Windows SmartScreen 可能提示已保护你的电脑：
+1. 运行安装包或程序。目前还没有代码签名，Windows SmartScreen 可能提示已保护你的电脑：
    点“更多信息”，再点“仍要运行”。
 2. 如果 Windows 防火墙询问，请允许**专用网络**，否则找不到接收端。
 3. 在列表里选接收端，选择屏幕或窗口，点“开始投屏”。
@@ -37,6 +51,12 @@ AirPlay or DLNA, so the delay is low (about a quarter of a second on a home netw
 | Quality / 画质 | Balanced 30 fps 8 Mbit/s; Smooth 60 fps 10 Mbit/s; Light 30 fps 4 Mbit/s. 均衡 / 流畅 / 省流 |
 | Encoder / 编码器 | Automatic tries AMD, then NVIDIA, then the CPU (x264). 自动：依次尝试 AMD、NVIDIA、CPU |
 | Send sound too / 同时传声音 | The sound the PC plays is sent too (and still plays on the PC). 电脑播放的声音一起传过去 |
+| Start with Windows / 开机自启 | Starts with Windows and waits in the tray. 随 Windows 启动并在系统托盘待命 |
+| Closing the window / 关闭窗口 | While casting, the cast keeps running in the tray (click its icon to open, or Stop/Quit in its menu); otherwise the program quits. 投屏时关闭窗口，投屏继续在托盘运行（点图标打开，菜单里可停止或退出）；没在投屏则直接退出 |
+
+## Uninstall / 卸载
+
+Settings > Apps > CastBay Desktop > Uninstall; it asks whether to delete your pairings and logs too. Portable: delete the folder (settings stay in `%APPDATA%\com.weenas.castbay.desktop`). 设置→应用→CastBay Desktop→卸载，会询问是否同时删除配对记录和日志；便携版直接删文件夹（设置保存在 `%APPDATA%\com.weenas.castbay.desktop`）。
 
 ## Troubleshooting / 常见问题
 
