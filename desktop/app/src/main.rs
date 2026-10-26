@@ -13,6 +13,37 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+/// Appends a line to the log file (kept to about 1 MB, plus the previous file).
+fn log(app: &AppHandle, line: &str) {
+    use std::io::Write;
+    let Ok(dir) = app.path().app_log_dir() else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let file = dir.join("castbay-desktop.log");
+    if std::fs::metadata(&file).map(|m| m.len() > 1_000_000).unwrap_or(false) {
+        let _ = std::fs::rename(&file, dir.join("castbay-desktop.old.log"));
+    }
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
+        let _ = writeln!(f, "{} {line}", utc(secs));
+    }
+}
+
+/// `2026-10-26 11:30:05Z` from Unix seconds.
+fn utc(secs: u64) -> String {
+    let (days, rest) = ((secs / 86400) as i64, secs % 86400);
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + (month <= 2) as i64;
+    format!("{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}Z", rest / 3600, rest % 3600 / 60, rest % 60)
+}
+
 #[derive(Default)]
 struct Casting {
     stopper: Mutex<Option<Stopper>>,
@@ -137,8 +168,13 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>) -> Res
     let ask = Box::new(move |_expected: &str| code_rx.recv_timeout(Duration::from_secs(180)).ok().flatten());
     let emitter = app.clone();
     let on_status = Arc::new(move |status: Status| {
+        match &status {
+            Status::Receiver { .. } => {}
+            other => log(&emitter, &format!("{other:?}")),
+        }
         let _ = emitter.emit("status", status_json(&status));
     });
+    log(&app, &format!("start: {}:{} {} {} {} {}", args.ip, args.port, args.kind, args.quality, args.encoder, args.value));
     let handle = castbay_sender::start(options, on_status, ask);
     *state.stopper.lock().unwrap() = Some(handle.stopper());
 
@@ -149,8 +185,9 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>) -> Res
         let state = app.state::<Casting>();
         *state.stopper.lock().unwrap() = None;
         *state.code.lock().unwrap() = None;
-        if let Err(reason) = outcome {
-            let _ = app.emit("status", json!({"kind": "failed", "reason": reason}));
+        if let Err(failure) = outcome {
+            log(&app, &format!("failed: {} ({})", failure.code, failure.detail));
+            let _ = app.emit("status", json!({"kind": "failed", "code": failure.code, "reason": failure.detail}));
         }
     });
     Ok(())
@@ -162,6 +199,24 @@ fn submit_code(code: Option<String>, state: State<'_, Casting>) {
     if let Some(tx) = state.code.lock().unwrap().as_ref() {
         let _ = tx.send(code.map(|c| c.trim().to_string()));
     }
+}
+
+/// Forgets a receiver's pinned key, for when it was reset and is the same device again.
+#[tauri::command]
+fn forget_receiver(id: String, app: AppHandle) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    castbay_link::Pins::load(&dir).forget(&id).map_err(|e| e.to_string())?;
+    log(&app, &format!("forgot receiver {id}"));
+    Ok(())
+}
+
+/// Shows the folder with the log file.
+#[tauri::command]
+fn open_logs(app: AppHandle) -> Result<(), String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::process::Command::new("explorer").arg(&dir).spawn().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -177,7 +232,19 @@ fn stop_cast(state: State<'_, Casting>) {
 fn main() {
     tauri::Builder::default()
         .manage(Casting::default())
-        .invoke_handler(tauri::generate_handler![discover, sources, start_cast, submit_code, stop_cast])
+        .invoke_handler(tauri::generate_handler![discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs])
         .run(tauri::generate_context!())
         .expect("the CastBay Desktop window failed to start");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::utc;
+
+    #[test]
+    fn dates_come_out_right() {
+        assert_eq!(utc(0), "1970-01-01 00:00:00Z");
+        assert_eq!(utc(951_782_400), "2000-02-29 00:00:00Z");
+        assert_eq!(utc(1_800_000_000), "2027-01-15 08:00:00Z");
+    }
 }

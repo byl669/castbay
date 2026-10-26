@@ -75,7 +75,11 @@
     <button id="stop" class="danger" data-i18n="stop">Stop casting</button>
   </section>
 
-  <p id="error" class="error" role="alert" hidden></p>
+  <div id="error-box" class="error" role="alert" hidden>
+    <p id="error"></p>
+    <button id="forget" class="link" hidden data-i18n="forget">Forget this receiver</button>
+  </div>
+  <footer><button id="logs" class="link" data-i18n="logs">Open log folder</button></footer>
 </main>
 <script src="app.js"></script>
 </body>
