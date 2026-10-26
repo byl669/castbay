@@ -1,0 +1,2 @@
+• Fixed music casting ending when the phone leaves the room or switches mesh nodes: the TV waits up to 20 s and the music resumes by itself.
+• Diagnostics note heartbeat gaps.
