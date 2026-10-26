@@ -57,5 +57,9 @@ dd { margin: 0; font-size: 18px; font-variant-numeric: tabular-nums; }
 footer { margin-top: 28px; text-align: center; }
 .error { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); border-radius: 8px; padding: 10px 12px; margin-top: 16px; }
 .ok { color: var(--ok); }
+#welcome { margin-top: 14px; }
+#welcome h2 { margin: 0 0 8px; }
+#welcome ol { margin: 0 0 12px; padding-left: 20px; }
+#welcome li { margin: 4px 0; }
 .update { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 14px; padding: 9px 12px; border-radius: 8px; background: var(--sel); }
 [hidden] { display: none !important; }
