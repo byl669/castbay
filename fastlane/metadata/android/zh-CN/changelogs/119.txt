@@ -1,0 +1,3 @@
+• 新增电脑投屏（映湾 Desktop）：Windows、Linux 电脑可把屏幕和声音投到电视，加密传输，默认关闭。
+• 修复退出后马上重开，接收器一直"启动中"的问题。
+• 修复部分电视盒子启动即报"Local network discovery failed"的问题。

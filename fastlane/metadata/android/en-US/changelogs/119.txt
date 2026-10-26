@@ -1,0 +1,3 @@
+• New: Desktop casting (CastBay Desktop) from Windows and Linux computers, with sound; encrypted, off by default.
+• Fixed the receiver staying on "Starting…" after a quick close and reopen.
+• Fixed "Local network discovery failed" on start on some TV boxes.
