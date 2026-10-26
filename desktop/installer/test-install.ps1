@@ -7,7 +7,13 @@ $exe = Join-Path $dir 'CastBay Desktop.exe'
 $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\CastBay Desktop.lnk'
 $log = Join-Path $env:TEMP 'castbay-msi.log'
 function Check($ok, $what) { if ($ok) { "ok: $what" } else { throw "FAILED: $what" } }
-function Arp { Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'CastBay Desktop' } }
+# Where Windows Installer registers the entry for Settings > Apps depends on the install scope.
+function Arp {
+  foreach ($root in 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall') {
+    $hit = Get-ItemProperty "$root\*" -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'CastBay Desktop' } | Select-Object -First 1
+    if ($hit) { $hit | Add-Member -NotePropertyName Where -NotePropertyValue $root -Force; return $hit }
+  }
+}
 function Msiexec($arguments) {
   # WaitForExit(ms), not Start-Process -Wait: that also waits for every process the installer started.
   $p = Start-Process msiexec.exe -ArgumentList $arguments -PassThru
@@ -27,6 +33,7 @@ foreach ($round in 1, 2) {
   Check (Test-Path $lnk) 'Start menu shortcut'
   $entry = Arp
   Check ($null -ne $entry) 'Settings > Apps entry'
+  "   (registered under $($entry.Where))"
   Check ($entry.DisplayVersion -eq $Version) "Settings > Apps shows version $Version"
   Check ((Get-Item $exe).Length -gt 1MB) 'program is not empty'
 }
