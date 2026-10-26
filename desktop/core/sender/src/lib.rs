@@ -14,6 +14,8 @@ pub use castbay_encode::ffmpeg::Codec;
 mod engine;
 #[cfg(windows)]
 mod power;
+#[cfg(windows)]
+mod rate;
 
 /// Everything needed to start a cast.
 pub struct Options {
@@ -51,6 +53,8 @@ pub enum Status {
     Reconnected,
     /// The receiver's once-a-second report.
     Receiver { decode_ms: i64, dropped: u64, fps: f64 },
+    /// The bitrate in use changed (the connection could not keep up, or has recovered), in bit/s.
+    Bitrate(u32),
     /// The PC's screen is locked (true) or unlocked again (false): Windows gives nothing to capture
     /// meanwhile, so the picture stays as it was.
     ScreenLocked(bool),
@@ -75,6 +79,9 @@ pub struct Report {
     pub pictures_taken: u64,
     /// AAC frames sent (0 without audio).
     pub audio_frames: u64,
+    /// The bitrate at the end, and how many times it was changed on the way.
+    pub final_bitrate_bps: u32,
+    pub bitrate_changes: u32,
     pub ended: String,
 }
 

@@ -129,6 +129,7 @@ fn status_json(status: &Status) -> serde_json::Value {
         Status::Casting { receiver, width, height } => json!({"kind": "casting", "receiver": receiver, "width": width, "height": height}),
         Status::Reconnecting(reason) => json!({"kind": "reconnecting", "reason": reason}),
         Status::Reconnected => json!({"kind": "reconnected"}),
+        Status::Bitrate(bps) => json!({"kind": "bitrate", "bps": bps}),
         Status::ScreenLocked(locked) => json!({"kind": "locked", "locked": locked}),
         Status::Receiver { decode_ms, dropped, fps } => json!({"kind": "stats", "decode_ms": decode_ms, "dropped": dropped, "fps": fps}),
         Status::Ended(reason) => json!({"kind": "ended", "reason": reason}),

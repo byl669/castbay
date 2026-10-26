@@ -50,7 +50,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin-top: 18px; }
 .big { font-size: 18px; font-weight: 600; margin: 0; }
 #code-box { margin-top: 14px; }
-dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0 0; }
+dl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 16px 0 0; }
 dt { color: var(--muted); font-size: 12px; }
 dd { margin: 0; font-size: 18px; font-variant-numeric: tabular-nums; }
 .error p { margin: 0; }

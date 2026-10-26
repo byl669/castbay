@@ -9,7 +9,7 @@ const zh = {
   quality: "画质", q_balanced: "均衡（30 帧，8 Mbit/s）", q_smooth: "流畅（60 帧，10 Mbit/s）", q_saver: "省流（30 帧，4 Mbit/s）",
   encoder: "编码器", e_auto: "自动", e_cpu: "CPU（x264）", start: "开始投屏", stop: "停止投屏",
   code_prompt: "请输入接收端屏幕上显示的 6 位配对码。", ok: "确定",
-  s_decode: "接收端解码", s_fps: "接收端帧率", s_dropped: "丢帧",
+  s_decode: "接收端解码", s_fps: "接收端帧率", s_dropped: "丢帧", s_rate: "码率",
   connecting: "正在连接…", needs_code: "需要配对", casting: "正在投屏到 {0}", casting_detail: "{0}×{1}",
   reconnecting: "连接中断，正在重连…", reconnected: "已重新连接",
   ended: "投屏已结束", ended_stopped_by_receiver: "接收端结束了投屏", ended_replaced: "接收端被另一台设备占用了",
@@ -155,6 +155,7 @@ listen("status", ({ payload: s }) => {
     case "needs_code": setState(t("needs_code")); $("code-box").hidden = false; $("code").value = ""; $("code").focus(); break;
     case "casting": $("code-box").hidden = true; $("stats").hidden = false; setState(t("casting", s.receiver), t("casting_detail", s.width, s.height)); break;
     case "reconnecting": setState(t("reconnecting")); break;
+    case "bitrate": $("s-rate").textContent = (s.bps / 1e6).toFixed(1) + " M"; break;
     case "locked": $("lock-note").hidden = !s.locked; break;
     case "reconnected": setState(t("casting", selected?.name ?? "")); break;
     case "stats":

@@ -346,6 +346,9 @@ fn cast(args: &[String]) {
         println!("audio: {} AAC frames sent", report.audio_frames);
     }
     println!("capture delivered {} pictures, {} went to the encoder", report.pictures_seen, report.pictures_taken);
+    if report.bitrate_changes > 0 {
+        println!("bitrate changed {} time(s), now {:.1} Mbit/s", report.bitrate_changes, report.final_bitrate_bps as f64 / 1e6);
+    }
     if report.reconnects > 0 {
         println!("reconnected {} time(s)", report.reconnects);
     }
