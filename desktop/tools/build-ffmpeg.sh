@@ -59,7 +59,7 @@ mkdir -p "$WORK/ffmpeg" && cd "$WORK/ffmpeg"
   --disable-everything --disable-avformat --disable-avdevice --disable-avfilter --disable-swresample \
   --enable-avcodec --enable-avutil --enable-swscale \
   --enable-libx264 --enable-ffnvcodec --enable-nvenc --enable-amf --enable-d3d11va \
-  --enable-encoder=libx264,h264_amf,h264_nvenc --enable-parser=h264 \
+  --enable-encoder=libx264,h264_amf,h264_nvenc,aac --enable-parser=h264 \
   --extra-cflags="-I$OUT/include" --extra-ldflags="-LIBPATH:$OUT/lib"
 make -j"$JOBS"
 make install

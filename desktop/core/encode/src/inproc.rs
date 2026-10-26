@@ -98,3 +98,69 @@ impl Drop for InProcessEncoder {
         unsafe { cb_enc_close(self.enc) }
     }
 }
+
+#[repr(C)]
+struct CbAac {
+    _private: [u8; 0],
+}
+
+extern "C" {
+    fn cb_aac_open(sample_rate: c_int, channels: c_int, bitrate: c_int, err: *mut c_char, errlen: c_int) -> *mut CbAac;
+    fn cb_aac_frame_size(e: *mut CbAac) -> c_int;
+    fn cb_aac_config(e: *mut CbAac, out: *mut u8, cap: c_int) -> c_int;
+    fn cb_aac_encode(e: *mut CbAac, interleaved: *const f32, out: *mut *const u8, out_len: *mut c_int) -> c_int;
+    fn cb_aac_close(e: *mut CbAac);
+}
+
+/// AAC-LC encoder for the audio of a cast: interleaved float samples in, raw AAC frames out.
+pub struct AacEncoder {
+    enc: *mut CbAac,
+    channels: usize,
+    frame_samples: usize,
+}
+
+unsafe impl Send for AacEncoder {}
+
+impl AacEncoder {
+    pub fn new(sample_rate: u32, channels: u32, bitrate_bps: u32) -> Result<Self, Error> {
+        let mut err = [0 as c_char; 256];
+        let enc = unsafe { cb_aac_open(sample_rate as c_int, channels as c_int, bitrate_bps as c_int, err.as_mut_ptr(), err.len() as c_int) };
+        if enc.is_null() {
+            let text = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }.to_string_lossy().into_owned();
+            return Err(Error(format!("aac: {text}")));
+        }
+        let frame_samples = unsafe { cb_aac_frame_size(enc) } as usize;
+        Ok(Self { enc, channels: channels as usize, frame_samples })
+    }
+
+    /// Samples per channel that go into each [`AacEncoder::encode`] call (1024).
+    pub fn frame_samples(&self) -> usize {
+        self.frame_samples
+    }
+
+    /// The AudioSpecificConfig the receiver's decoder needs.
+    pub fn config(&self) -> Vec<u8> {
+        let mut out = [0u8; 16];
+        let n = unsafe { cb_aac_config(self.enc, out.as_mut_ptr(), out.len() as c_int) };
+        out[..n.max(0) as usize].to_vec()
+    }
+
+    /// Encodes `frame_samples() * channels` interleaved samples; the frame that comes out, if any.
+    pub fn encode(&mut self, interleaved: &[f32]) -> Result<Option<Vec<u8>>, Error> {
+        if interleaved.len() != self.frame_samples * self.channels {
+            return Err(Error("wrong number of audio samples".into()));
+        }
+        let (mut out, mut len) = (std::ptr::null(), 0);
+        match unsafe { cb_aac_encode(self.enc, interleaved.as_ptr(), &mut out, &mut len) } {
+            1 => Ok(Some(unsafe { std::slice::from_raw_parts(out, len as usize) }.to_vec())),
+            0 => Ok(None),
+            code => Err(Error(format!("aac encode failed ({code})"))),
+        }
+    }
+}
+
+impl Drop for AacEncoder {
+    fn drop(&mut self) {
+        unsafe { cb_aac_close(self.enc) }
+    }
+}

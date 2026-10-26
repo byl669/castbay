@@ -7,6 +7,9 @@ use std::time::Duration;
 #[cfg(windows)]
 pub mod windows;
 
+#[cfg(windows)]
+pub mod audio;
+
 /// What to capture.
 #[derive(Debug, Clone)]
 pub enum Target {

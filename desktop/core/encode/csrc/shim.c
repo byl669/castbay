@@ -108,3 +108,77 @@ int cb_enc_encode(CbEnc *e, const uint8_t *nv12, int64_t pts_us, int force_key,
     *out_pts = e->pkt->pts;
     return 1;
 }
+
+// ---- AAC-LC audio -------------------------------------------------------------------------
+
+typedef struct CbAac {
+    AVCodecContext *ctx;
+    AVFrame *frame;
+    AVPacket *pkt;
+} CbAac;
+
+void cb_aac_close(CbAac *e) {
+    if (!e) return;
+    av_packet_free(&e->pkt);
+    av_frame_free(&e->frame);
+    avcodec_free_context(&e->ctx);
+    av_free(e);
+}
+
+CbAac *cb_aac_open(int sample_rate, int channels, int bitrate, char *err, int errlen) {
+    const AVCodec *codec = avcodec_find_encoder_by_name("aac");
+    if (!codec) { fail(err, errlen, "AAC encoder not built in", 0); return NULL; }
+    CbAac *e = av_mallocz(sizeof *e);
+    e->ctx = avcodec_alloc_context3(codec);
+    e->frame = av_frame_alloc();
+    e->pkt = av_packet_alloc();
+    AVCodecContext *c = e->ctx;
+    c->sample_fmt = AV_SAMPLE_FMT_FLTP;
+    c->sample_rate = sample_rate;
+    c->bit_rate = bitrate;
+    c->time_base = (AVRational){1, sample_rate};
+    c->profile = AV_PROFILE_AAC_LOW;
+    c->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    av_channel_layout_default(&c->ch_layout, channels);
+    int r = avcodec_open2(c, codec, NULL);
+    if (r < 0) { fail(err, errlen, "open AAC", r); cb_aac_close(e); return NULL; }
+    e->frame->format = c->sample_fmt;
+    e->frame->nb_samples = c->frame_size;
+    av_channel_layout_copy(&e->frame->ch_layout, &c->ch_layout);
+    if ((r = av_frame_get_buffer(e->frame, 0)) < 0) { fail(err, errlen, "AAC frame buffer", r); cb_aac_close(e); return NULL; }
+    return e;
+}
+
+// Samples per channel in one frame (1024 for AAC-LC).
+int cb_aac_frame_size(CbAac *e) { return e->ctx->frame_size; }
+
+// The AudioSpecificConfig; returns its length (0 if there is none).
+int cb_aac_config(CbAac *e, uint8_t *out, int cap) {
+    int n = e->ctx->extradata_size;
+    if (n > cap) return 0;
+    memcpy(out, e->ctx->extradata, n);
+    return n;
+}
+
+// Encodes one frame of interleaved float samples (frame_size * channels values). Returns 1 with a
+// raw AAC frame in *out (valid until the next call), 0 when the encoder has nothing yet, or a
+// negative error code.
+int cb_aac_encode(CbAac *e, const float *interleaved, const uint8_t **out, int *out_len) {
+    AVFrame *f = e->frame;
+    int r = av_frame_make_writable(f);
+    if (r < 0) return r;
+    int channels = e->ctx->ch_layout.nb_channels;
+    for (int ch = 0; ch < channels; ch++) {
+        float *dst = (float *)f->data[ch];
+        for (int i = 0; i < f->nb_samples; i++) dst[i] = interleaved[i * channels + ch];
+    }
+    r = avcodec_send_frame(e->ctx, f);
+    if (r < 0) return r;
+    av_packet_unref(e->pkt);
+    r = avcodec_receive_packet(e->ctx, e->pkt);
+    if (r == AVERROR(EAGAIN)) return 0;
+    if (r < 0) return r;
+    *out = e->pkt->data;
+    *out_len = e->pkt->size;
+    return 1;
+}

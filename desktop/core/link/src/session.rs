@@ -19,7 +19,16 @@ use tokio_rustls::client::TlsStream;
 use tokio_rustls::TlsConnector;
 
 use crate::identity::{fingerprint, hex, Identity, Pins};
-use crate::protocol::{control_frame, verification_code, video_frame, Error, MAX_CONTROL, TYPE_CONTROL, VERSION};
+use crate::protocol::{audio_frame, control_frame, verification_code, video_frame, Error, MAX_CONTROL, TYPE_CONTROL, VERSION};
+
+/// Audio the sender will send: AAC-LC frames (see docs/protocol.md).
+#[derive(Debug, Clone)]
+pub struct AudioOffer {
+    pub sample_rate: u32,
+    pub channels: u32,
+    /// The AudioSpecificConfig, as hex.
+    pub config_hex: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -33,6 +42,8 @@ pub struct Config {
     pub bitrate_bps: u32,
     /// `screen` or `window`.
     pub source: String,
+    /// Audio to offer along with the picture; the receiver says whether it will play it.
+    pub audio: Option<AudioOffer>,
 }
 
 /// Where the pairing code comes from: the person at the keyboard, who reads it off the TV.
@@ -163,6 +174,8 @@ pub struct Session {
     /// The receiver's id and key, for the caller's display.
     pub receiver_id: String,
     pub receiver_name: String,
+    /// The receiver will play the offered audio: only then is it sent.
+    pub audio_accepted: bool,
 }
 
 /// Connects to the receiver at `addr`, pairs if it asks, and offers the stream.
@@ -235,13 +248,20 @@ pub async fn connect(
         pins.pin(&id, &receiver_fp)?;
     }
 
-    let offer = json!({"t": "offer", "codec": "h264", "width": config.width, "height": config.height,
+    let mut offer = json!({"t": "offer", "codec": "h264", "width": config.width, "height": config.height,
         "fps": config.fps, "bitrate": config.bitrate_bps, "source": config.source});
+    if let Some(audio) = &config.audio {
+        offer["audio"] = json!({"codec": "aac", "sample_rate": audio.sample_rate, "channels": audio.channels, "config": audio.config_hex});
+    }
     writer.write_all(&control_frame(&offer)).await?;
+    let audio_accepted;
     loop {
         let message = expect(&mut reader, "accept").await?;
         match kind(&message) {
-            "accept" => break,
+            "accept" => {
+                audio_accepted = config.audio.is_some() && message.get("audio").and_then(Value::as_bool) == Some(true);
+                break;
+            }
             "reject" => return Err(Error::Rejected(reason(&message))),
             _ => {}
         }
@@ -253,7 +273,7 @@ pub async fn connect(
     let closed = Arc::new(AtomicBool::new(false));
     let writer_task = tokio::spawn(write_loop(writer, queue, closed.clone()));
     let reader_task = tokio::spawn(read_loop(reader, events_tx, closed.clone()));
-    Ok(Session { frames, events, dropping, closed, writer: writer_task, reader: reader_task, receiver_id: id, receiver_name })
+    Ok(Session { frames, events, dropping, closed, writer: writer_task, reader: reader_task, receiver_id: id, receiver_name, audio_accepted })
 }
 
 /// Pictures waiting to be written; more than this and the connection is not keeping up.
@@ -330,6 +350,14 @@ impl Session {
                 SendResult::Dropped
             }
             Err(mpsc::error::TrySendError::Closed(_)) => SendResult::Closed,
+        }
+    }
+
+    /// Queues one AAC frame. Audio is never held back for video's sake: if the connection is
+    /// behind, the frame is simply lost (a short gap beats a growing delay).
+    pub fn send_audio(&self, pts_us: u64, frame: &[u8]) {
+        if self.audio_accepted && !self.closed.load(Ordering::SeqCst) {
+            let _ = self.frames.try_send(audio_frame(pts_us, frame));
         }
     }
 

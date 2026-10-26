@@ -316,6 +316,7 @@ fn cast(args: &[String]) {
         fps,
         bitrate_bps: bitrate,
         codec: Some(codec),
+        audio: args.iter().any(|a| a == "--audio"),
         data_dir: data_dir(args),
         max_duration: Some(Duration::from_secs(seconds)),
     };
@@ -340,6 +341,9 @@ fn cast(args: &[String]) {
         "units sent: {} ({} dropped, {} repeated pictures), {:.2} Mbit/s, {:.1} fps",
         report.units_sent, report.units_dropped, report.repeated_pictures, report.bytes as f64 * 8.0 / report.seconds / 1e6, report.units_sent as f64 / report.seconds
     );
+    if report.audio_frames > 0 {
+        println!("audio: {} AAC frames sent", report.audio_frames);
+    }
     println!("capture delivered {} pictures, {} went to the encoder", report.pictures_seen, report.pictures_taken);
     if report.reconnects > 0 {
         println!("reconnected {} time(s)", report.reconnects);
