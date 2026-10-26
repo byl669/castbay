@@ -62,4 +62,6 @@ footer { margin-top: 28px; text-align: center; }
 #welcome ol { margin: 0 0 12px; padding-left: 20px; }
 #welcome li { margin: 4px 0; }
 .update { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 14px; padding: 9px 12px; border-radius: 8px; background: var(--sel); }
+label.check { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+label.check span { margin: 0; color: var(--text); font-size: 14px; }
 [hidden] { display: none !important; }

@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 pub const VERSION: u32 = 1;
 pub const TYPE_CONTROL: u8 = 1;
 pub const TYPE_VIDEO: u8 = 2;
+pub const TYPE_AUDIO: u8 = 3;
 pub const MAX_MESSAGE: usize = 8 * 1024 * 1024;
 pub const MAX_CONTROL: usize = 64 * 1024;
 
@@ -66,6 +67,17 @@ pub fn control_frame(json: &serde_json::Value) -> Vec<u8> {
     out
 }
 
+/// One raw AAC-LC frame as a frame.
+pub fn audio_frame(pts_us: u64, frame: &[u8]) -> Vec<u8> {
+    let length = 8 + frame.len();
+    let mut out = Vec::with_capacity(5 + length);
+    out.push(TYPE_AUDIO);
+    out.extend_from_slice(&(length as u32).to_be_bytes());
+    out.extend_from_slice(&pts_us.to_be_bytes());
+    out.extend_from_slice(frame);
+    out
+}
+
 /// One access unit as a frame.
 pub fn video_frame(pts_us: u64, key: bool, unit: &[u8]) -> Vec<u8> {
     let length = 9 + unit.len();
@@ -101,6 +113,11 @@ mod tests {
     fn frames_have_the_receivers_layout() {
         let video = video_frame(0x0102030405060708, true, &[9, 9]);
         assert_eq!(video[0], TYPE_VIDEO);
+        let audio = audio_frame(7, &[1, 2, 3]);
+        assert_eq!(audio[0], TYPE_AUDIO);
+        assert_eq!(&audio[1..5], &11u32.to_be_bytes());
+        assert_eq!(&audio[5..13], &7u64.to_be_bytes());
+        assert_eq!(&audio[13..], &[1, 2, 3]);
         assert_eq!(&video[1..5], &11u32.to_be_bytes());
         assert_eq!(&video[5..13], &0x0102030405060708u64.to_be_bytes());
         assert_eq!(video[13], 1);

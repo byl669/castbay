@@ -59,6 +59,76 @@ impl Enc {
     }
 }
 
+/// AAC-LC encoding for the cast's audio; only the in-process encoder build has one.
+trait Aac: Send {
+    fn config(&self) -> Vec<u8>;
+    fn frame_samples(&self) -> usize;
+    fn encode(&mut self, interleaved: &[f32]) -> Option<Vec<u8>>;
+}
+
+#[cfg(feature = "ffmpeg-lib")]
+impl Aac for castbay_encode::inproc::AacEncoder {
+    fn config(&self) -> Vec<u8> {
+        castbay_encode::inproc::AacEncoder::config(self)
+    }
+    fn frame_samples(&self) -> usize {
+        castbay_encode::inproc::AacEncoder::frame_samples(self)
+    }
+    fn encode(&mut self, interleaved: &[f32]) -> Option<Vec<u8>> {
+        castbay_encode::inproc::AacEncoder::encode(self, interleaved).ok().flatten()
+    }
+}
+
+fn open_aac() -> Option<Box<dyn Aac>> {
+    #[cfg(feature = "ffmpeg-lib")]
+    {
+        castbay_encode::inproc::AacEncoder::new(castbay_capture::audio::SAMPLE_RATE, castbay_capture::audio::CHANNELS, 128_000)
+            .ok()
+            .map(|e| Box::new(e) as Box<dyn Aac>)
+    }
+    #[cfg(not(feature = "ffmpeg-lib"))]
+    {
+        None
+    }
+}
+
+/// Captures what the PC plays, encodes it and sends it on the current connection until the end.
+/// A device that goes away (the default output changed) is picked up again a second later.
+fn run_audio(mut enc: Box<dyn Aac>, session_ref: Arc<Mutex<Option<Session>>>, over: impl Fn() -> bool, started: Instant, counter: Arc<std::sync::atomic::AtomicU64>) {
+    let samples_per_frame = enc.frame_samples();
+    let frame_len = samples_per_frame * castbay_capture::audio::CHANNELS as usize;
+    let frame_us = samples_per_frame as u64 * 1_000_000 / castbay_capture::audio::SAMPLE_RATE as u64;
+    let base_us = started.elapsed().as_micros() as u64;
+    let mut pending: Vec<f32> = Vec::with_capacity(frame_len * 4);
+    let mut sent: u64 = 0;
+    while !over() {
+        let _ = castbay_capture::audio::run_loopback(&over, |samples| {
+            pending.extend_from_slice(samples);
+            // Never more than about a second behind: an encoder that cannot keep up loses sound, not time.
+            if pending.len() > frame_len * 48 {
+                let drop = pending.len() - frame_len * 4;
+                pending.drain(..drop);
+            }
+            while pending.len() >= frame_len {
+                let chunk: Vec<f32> = pending.drain(..frame_len).collect();
+                if let Some(frame) = enc.encode(&chunk) {
+                    if let Some(link) = session_ref.lock().unwrap().as_ref() {
+                        link.send_audio(base_us + sent * frame_us, &frame);
+                    }
+                    sent += 1;
+                    counter.store(sent, Ordering::Relaxed);
+                }
+            }
+        });
+        for _ in 0..10 {
+            if over() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
 struct State {
     encoder: Option<Enc>,
     nv12: Vec<u8>,
@@ -139,7 +209,7 @@ pub fn run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> O
 }
 
 fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, done: std::sync::mpsc::Sender<Result<Report, Failure>>) -> Result<(), Failure> {
-    let Options { addr, receiver_id, name, password, target, fps, bitrate_bps, codec, data_dir, max_duration } = options;
+    let Options { addr, receiver_id, name, password, target, fps, bitrate_bps, codec, audio, data_dir, max_duration } = options;
     on_status(Status::Connecting);
     let runtime = tokio::runtime::Runtime::new().map_err(|e| Failure::new("other", e.to_string()))?;
 
@@ -170,6 +240,12 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
 
     let identity = castbay_link::Identity::load_or_create(&data_dir).map_err(Failure::from)?;
     let mut pins = castbay_link::Pins::load(&data_dir);
+    let aac = if audio { open_aac() } else { None };
+    let audio_offer = aac.as_ref().map(|enc| castbay_link::AudioOffer {
+        sample_rate: castbay_capture::audio::SAMPLE_RATE,
+        channels: castbay_capture::audio::CHANNELS,
+        config_hex: enc.config().iter().map(|b| format!("{b:02x}")).collect(),
+    });
     let link_config = castbay_link::Config {
         name,
         password,
@@ -178,6 +254,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
         fps,
         bitrate_bps,
         source: if matches!(target, Target::Window(_)) { "window" } else { "screen" }.into(),
+        audio: audio_offer,
     };
     let mut ask = {
         let (on_status, mut code) = (on_status.clone(), code);
@@ -190,6 +267,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
         .block_on(castbay_link::connect(addr, &identity, &mut pins, receiver_id.as_deref(), &link_config, &mut ask))
         .map_err(Failure::from)?;
     on_status(Status::Casting { receiver: session.receiver_name.clone(), width, height });
+    let audio_accepted = session.audio_accepted;
 
     let started = Instant::now();
     let interval = Duration::from_micros(1_000_000 / fps as u64);
@@ -220,6 +298,15 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
         frames_seen: 0,
         frames_taken: 0,
     }));
+
+    let audio_frames = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let audio_thread = match aac {
+        Some(enc) if audio_accepted => {
+            let (session_ref, over, counter) = (session_ref.clone(), over.clone(), audio_frames.clone());
+            Some(std::thread::spawn(move || run_audio(enc, session_ref, over, started, counter)))
+        }
+        _ => None,
+    };
 
     // Reads what the receiver says, and repeats the last picture on a static screen so the
     // stream stays alive.
@@ -323,6 +410,9 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
             finish.store(true, Ordering::SeqCst);
             let _ = repeater.join();
             let _ = reconnector.join();
+            if let Some(thread) = audio_thread {
+                let _ = thread.join();
+            }
             // The capture ends with its next picture; a screen that delivers none is left behind.
             for _ in 0..30 {
                 if capture_done.load(Ordering::SeqCst) {
@@ -333,7 +423,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
             if let Some(link) = session_ref.lock().unwrap().take() {
                 runtime.block_on(link.close());
             }
-            let _ = done.send(report(&state, started, &stop, &on_status));
+            let _ = done.send(report(&state, started, &stop, &on_status, audio_frames.load(Ordering::Relaxed)));
         })
     };
     let result = {
@@ -378,7 +468,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
 }
 
 /// Builds the report of a finished cast and announces its end.
-fn report(state: &Arc<Mutex<State>>, started: Instant, stop: &Arc<AtomicBool>, on_status: &OnStatus) -> Result<Report, Failure> {
+fn report(state: &Arc<Mutex<State>>, started: Instant, stop: &Arc<AtomicBool>, on_status: &OnStatus, audio_frames: u64) -> Result<Report, Failure> {
     let mut st = state.lock().unwrap();
     let ended = if let Some(failure) = st.failed.clone() {
         failure.detail
@@ -403,6 +493,7 @@ fn report(state: &Arc<Mutex<State>>, started: Instant, stop: &Arc<AtomicBool>, o
         last_receiver_report: st.last_report,
         pictures_seen: st.frames_seen,
         pictures_taken: st.frames_taken,
+        audio_frames,
         ended: ended.clone(),
     };
     match &st.failed {

@@ -82,6 +82,8 @@ struct StartArgs {
     quality: String,
     /// `auto`, `amf`, `nvenc` or `x264`.
     encoder: String,
+    /// Send the PC's sound too.
+    audio: bool,
 }
 
 /// Looks for receivers for a few seconds.
@@ -159,6 +161,7 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>) -> Res
         fps,
         bitrate_bps,
         codec,
+        audio: args.audio,
         data_dir,
         max_duration: None,
     };

@@ -17,6 +17,7 @@ const zh = {
   w_title: "开始使用", w_1: "在电视或平板上打开映湾，在设置里开启“电脑投屏”。",
   w_2: "如果 Windows 防火墙弹窗询问，请允许在专用网络上访问，否则找不到接收端。",
   w_3: "在下面选择接收端并开始投屏。第一次连接时接收端会显示 6 位配对码，在这里输入即可。", w_ok: "知道了",
+  audio: "同时传声音",
   update_open: "下载", update_text: "有新版本 {0} 可用", failed: "无法投屏：{0}", logs: "打开日志文件夹", forget: "忘记这个接收端",
   f_busy: "接收端正在被另一台设备使用。", f_blocked: "接收端屏蔽了这台电脑。请在接收端的“已知设备”里解除屏蔽。",
   f_approval_needed: "接收端需要有人在它的屏幕上点“允许”。请确认后重试。", f_locked: "配对尝试次数过多，接收端暂时锁定了配对，请一分钟后重试。",
@@ -176,6 +177,7 @@ document.querySelectorAll('input[name="kind"]').forEach((r) => r.addEventListene
 $("source").addEventListener("change", () => store.set("source-" + document.querySelector('input[name="kind"]:checked').value, $("source").value));
 $("quality").addEventListener("change", () => store.set("quality", $("quality").value));
 $("encoder").addEventListener("change", () => store.set("encoder", $("encoder").value));
+$("audio").addEventListener("change", () => store.set("audio", $("audio").checked ? "1" : "0"));
 
 $("start").addEventListener("click", async () => {
   if (!selected) { showError(t("pick_receiver")); return; }
@@ -186,7 +188,7 @@ $("start").addEventListener("click", async () => {
       args: {
         id: selected.id, ip: selected.ip, port: selected.port,
         password: selected.password ? $("password").value : null,
-        kind, value: $("source").value, quality: $("quality").value, encoder: $("encoder").value,
+        kind, value: $("source").value, quality: $("quality").value, encoder: $("encoder").value, audio: $("audio").checked,
       },
     });
     showSession(true);
@@ -212,6 +214,7 @@ $("stop").addEventListener("click", () => invoke("stop_cast"));
   if (radio) radio.checked = true;
   $("quality").value = store.get("quality", "balanced");
   $("encoder").value = store.get("encoder", "auto");
+  $("audio").checked = store.get("audio", "1") === "1";
 }
 refreshSources();
 refreshReceivers();

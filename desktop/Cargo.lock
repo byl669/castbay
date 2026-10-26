@@ -316,6 +316,7 @@ dependencies = [
 name = "castbay-capture"
 version = "0.0.0"
 dependencies = [
+ "windows 0.61.3",
  "windows-capture",
 ]
 

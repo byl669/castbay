@@ -28,6 +28,8 @@ pub struct Options {
     pub codec: Option<Codec>,
     /// Where the identity and the pinned receivers live.
     pub data_dir: PathBuf,
+    /// Send the sound the PC is playing too (needs the in-process encoders, feature `ffmpeg-lib`).
+    pub audio: bool,
     /// Stop by itself after this long (tests and benchmarks); None casts until stopped.
     pub max_duration: Option<Duration>,
 }
@@ -63,6 +65,8 @@ pub struct Report {
     /// Pictures the capture delivered, and how many went to the encoder.
     pub pictures_seen: u64,
     pub pictures_taken: u64,
+    /// AAC frames sent (0 without audio).
+    pub audio_frames: u64,
     pub ended: String,
 }
 
