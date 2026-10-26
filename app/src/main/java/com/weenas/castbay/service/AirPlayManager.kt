@@ -25,8 +25,15 @@ class AirPlayManager private constructor(private val context: Context) {
         /** Two heartbeats missed (they come every two seconds; the TCL's gaps stayed under 2.6 s). */
         private const val HEARTBEAT_TIMEOUT_MS = 5000L
         /**
+         * Music waits this long for a phone that went quiet: walking between the nodes of a mesh
+         * Wi-Fi (or out of a room) cut both its heartbeats and its audio for 8 s or more, and it
+         * connected again by itself after about 15 s. Mirroring stops at [HEARTBEAT_TIMEOUT_MS]:
+         * a frozen picture is not worth waiting for.
+         */
+        private const val HEARTBEAT_MUSIC_TIMEOUT_MS = 20_000L
+        /**
          * Music still arriving means the phone is there: its heartbeats (TCP) can be held up for
-         * seconds while it moves between mesh Wi-Fi nodes, but its audio (UDP) goes on.
+         * seconds while its audio (UDP) goes on.
          */
         private const val AUDIO_ALIVE_MS = 3000L
         /** Even with music arriving, this long without a heartbeat is the end. */
@@ -689,7 +696,12 @@ class AirPlayManager private constructor(private val context: Context) {
             val now = android.os.SystemClock.elapsedRealtime()
             val silentMs = now - last
             val audioAlive = stream.isAudioOnly && now - lastAudioAtMs < AUDIO_ALIVE_MS
-            if (watched && silentMs > (if (audioAlive) HEARTBEAT_HARD_TIMEOUT_MS else HEARTBEAT_TIMEOUT_MS)) {
+            val limit = when {
+                audioAlive -> HEARTBEAT_HARD_TIMEOUT_MS
+                stream.isAudioOnly -> HEARTBEAT_MUSIC_TIMEOUT_MS
+                else -> HEARTBEAT_TIMEOUT_MS
+            }
+            if (watched && silentMs > limit) {
                 Log.i(TAG, "No heartbeat from the AirPlay sender for $silentMs ms: it has gone")
                 endCasting()
                 return
