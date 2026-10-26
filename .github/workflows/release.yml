@@ -24,8 +24,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Top level only: OpenSSL's own submodules (test data, other libraries) aren't needed.
-          submodules: true
+          # The app's submodules are fetched below; desktop/third_party (FFmpeg and friends,
+          # hundreds of MB) is only for CastBay Desktop.
+          submodules: false
+      # Top level only: OpenSSL's own submodules (test data, other libraries) aren't needed.
+      - name: Fetch the app's submodules
+        run: git submodule update --init -- third_party/UxPlay third_party/alac third_party/libplist third_party/openssl
 
       - name: Check the tag matches the app version
         run: |
