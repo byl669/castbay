@@ -15,6 +15,7 @@ Visual Studio's C++ tools); then `cargo build --release -p castbay-desktop --fea
 with `FFMPEG_DIR` pointing at its output (default `desktop/build/ffmpeg`). Without the feature the
 encoders run as an `ffmpeg.exe` child process (`CASTBAY_FFMPEG`).
 
+- [docs/user-guide.md](docs/user-guide.md): installing and using it (English and 中文)
 - [docs/design.md](docs/design.md): decisions, architecture, phases, risks
 - [docs/protocol.md](docs/protocol.md): the CastBay Link protocol (draft)
 - [docs/spike-latency.md](docs/spike-latency.md): the first end-to-end measurement
