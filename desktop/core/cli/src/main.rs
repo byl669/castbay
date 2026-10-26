@@ -317,6 +317,7 @@ fn cast(args: &[String]) {
         bitrate_bps: bitrate,
         codec: Some(codec),
         audio: args.iter().any(|a| a == "--audio"),
+        max_size: (option(args, "--max-width").and_then(|v| v.parse().ok()).unwrap_or(1920), option(args, "--max-height").and_then(|v| v.parse().ok()).unwrap_or(1080)),
         data_dir: data_dir(args),
         max_duration: Some(Duration::from_secs(seconds)),
     };

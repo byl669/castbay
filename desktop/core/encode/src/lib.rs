@@ -4,6 +4,7 @@
 use std::fmt;
 
 pub mod ffmpeg;
+pub mod scale;
 
 #[cfg(feature = "ffmpeg-lib")]
 pub mod inproc;
