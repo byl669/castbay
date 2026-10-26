@@ -134,6 +134,20 @@ and the Windows driver were not involved, so this checks the encoder settings, n
 
 Still to do: NVENC on Windows with capture, once there is a Windows machine with an NVIDIA GPU.
 
+## Audio, scaling and bitrate control (Sony, 2026-10-26)
+
+- **Sound:** a 440 Hz tone played on the PC for 14 s: 652 AAC frames sent (48 kHz, one frame
+  every 21 ms), a started media AudioTrack on the TV, video unchanged (29.9 fps, 0 dropped).
+  Sound and picture have separate queues: with one shared queue 88 video units were dropped while
+  the TV app was restarting mid-cast; with separate queues two such runs dropped 0.
+- **Scaling:** the whole 1920x1200 screen goes out as 1728x1080; the sender's picture delay is
+  46 ms median (35 ms without scaling), decode 14 ms, 0 dropped. A cast window resized mid-cast
+  keeps updating, centred with black bars (1433 units in 50 s, 0 dropped).
+- **Bitrate control:** normal casts at 8, 30 and 80 Mbit/s all drop 0 pictures on this network
+  (x264 on the test picture does not even reach 11 Mbit/s), so real congestion could not be
+  provoked. With a simulated burst of drops five seconds in, a 40 s cast went 8 to 5.6 Mbit/s at
+  5 s and back up to 6.4 at 25 s; the TV kept 30 fps, 0 dropped, across the encoder reopen.
+
 ## Not measured yet
 
 AirPlay mirroring on the same TV (a fair comparison); NVIDIA on Windows and Intel encoders; 4K; a
