@@ -11,6 +11,7 @@
     "windows": [
       {
         "title": "CastBay Desktop",
+        "visible": false,
         "width": 480,
         "height": 680,
         "minWidth": 420,

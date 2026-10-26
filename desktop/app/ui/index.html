@@ -96,7 +96,10 @@
     <p id="error"></p>
     <button id="forget" class="link" hidden data-i18n="forget">Forget this receiver</button>
   </div>
-  <footer><button id="logs" class="link" data-i18n="logs">Open log folder</button></footer>
+  <footer>
+    <label class="check"><input id="autostart" type="checkbox"> <span data-i18n="autostart">Start with Windows (waits in the tray)</span></label>
+    <p class="hint" data-i18n="tray_hint">Closing the window while casting keeps the cast running in the tray.</p>
+    <button id="logs" class="link" data-i18n="logs">Open log folder</button></footer>
 </main>
 <script src="app.js"></script>
 </body>
