@@ -128,8 +128,8 @@ async fn discover() -> Result<Vec<ReceiverView>, String> {
 #[tauri::command]
 fn sources() -> Result<Sources, String> {
     Ok(Sources {
-        monitors: castbay_capture::windows::monitors().map_err(|e| e.to_string())?,
-        windows: castbay_capture::windows::windows().map_err(|e| e.to_string())?,
+        monitors: castbay_capture::monitors().map_err(|e| e.to_string())?,
+        windows: castbay_capture::window_titles().map_err(|e| e.to_string())?,
     })
 }
 

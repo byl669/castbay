@@ -10,11 +10,14 @@ use std::time::Duration;
 pub use castbay_capture::Target;
 pub use castbay_encode::ffmpeg::Codec;
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 mod engine;
 #[cfg(windows)]
 mod power;
-#[cfg(windows)]
+#[cfg(target_os = "linux")]
+#[path = "power_linux.rs"]
+mod power;
+#[cfg(any(windows, target_os = "linux"))]
 mod rate;
 
 /// Everything needed to start a cast.
@@ -174,7 +177,7 @@ impl Handle {
 
 /// Starts casting on its own threads. `code` is asked for the pairing code when the receiver
 /// needs one (the person reads it off the TV).
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 pub fn start(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>) -> Handle {
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let flag = stop.clone();
@@ -186,10 +189,10 @@ pub fn start(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) ->
     Handle { stop, result, finished: std::cell::Cell::new(None) }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn start(_: Options, _: OnStatus, _: Box<dyn FnMut(&str) -> Option<String> + Send>) -> Handle {
     let (tx, result) = std::sync::mpsc::channel();
-    let _ = tx.send(Err(Failure::new("other", "casting is only implemented on Windows so far")));
+    let _ = tx.send(Err(Failure::new("other", "casting is not implemented on this system")));
     Handle { stop: Arc::new(std::sync::atomic::AtomicBool::new(true)), result, finished: std::cell::Cell::new(None) }
 }
 

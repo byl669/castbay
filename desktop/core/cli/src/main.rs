@@ -1,6 +1,8 @@
 //! `castbay-cast`: a command-line sender used for tests and benchmarks.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(windows)]
+use std::time::Instant;
 
 use castbay_capture::Target;
 
@@ -19,17 +21,17 @@ fn main() {
     }
 }
 
-#[cfg(windows)]
 fn list() {
-    match castbay_capture::windows::monitors() {
-        Ok(items) => items.iter().for_each(|m| println!("monitor {m}")),
-        Err(error) => eprintln!("{error}"),
+    match (castbay_capture::monitors(), castbay_capture::window_titles()) {
+        (Ok(monitors), Ok(windows)) => {
+            monitors.iter().for_each(|m| println!("monitor {m}"));
+            windows.iter().for_each(|w| println!("window {w}"));
+            if monitors.is_empty() && windows.is_empty() {
+                println!("nothing to list here: on this system the desktop asks the person what to share");
+            }
+        }
+        (Err(error), _) | (_, Err(error)) => eprintln!("{error}"),
     }
-}
-
-#[cfg(not(windows))]
-fn list() {
-    eprintln!("capture is only implemented on Windows so far");
 }
 
 fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
@@ -252,13 +254,20 @@ fn data_dir(args: &[String]) -> std::path::PathBuf {
     if let Some(dir) = option(args, "--identity") {
         return dir.into();
     }
-    let base = std::env::var_os("APPDATA").or_else(|| std::env::var_os("HOME")).map(std::path::PathBuf::from).unwrap_or_else(|| ".".into());
-    base.join("CastBay Desktop")
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        return std::path::PathBuf::from(appdata).join("CastBay Desktop");
+    }
+    // Elsewhere: the XDG data folder.
+    let share = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))
+        .unwrap_or_else(|| ".".into());
+    share.join("castbay-desktop")
 }
 
 /// Captures, encodes and casts to a CastBay receiver over CastBay Link (the engine is
 /// castbay-sender; this is its command line).
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn cast(args: &[String]) {
     use castbay_sender::{Codec, Options, Status};
     use std::sync::Arc;
@@ -361,7 +370,7 @@ fn cast(args: &[String]) {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 fn cast(_: &[String]) {
-    eprintln!("casting is only implemented on Windows so far");
+    eprintln!("casting is not implemented on this system");
 }

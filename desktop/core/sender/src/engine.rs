@@ -242,7 +242,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
     {
         let (first, target) = (first.clone(), target.clone());
         std::thread::spawn(move || {
-            let _ = castbay_capture::windows::run(&target, move |frame| {
+            let _ = castbay_capture::run(&target, move |frame| {
                 *first.lock().unwrap() = Some((frame.width & !1, frame.height & !1));
                 false
             });
@@ -480,7 +480,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
     let result = {
         let (state, session_ref, over) = (state.clone(), session_ref.clone(), over.clone());
         let capture_status = on_status.clone();
-        castbay_capture::windows::run(&target, move |frame| {
+        castbay_capture::run(&target, move |frame| {
             if over() {
                 return false;
             }
