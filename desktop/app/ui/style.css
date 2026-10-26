@@ -53,6 +53,8 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 16px 0 0; }
 dt { color: var(--muted); font-size: 12px; }
 dd { margin: 0; font-size: 18px; font-variant-numeric: tabular-nums; }
+.error p { margin: 0; }
+footer { margin-top: 28px; text-align: center; }
 .error { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); border-radius: 8px; padding: 10px 12px; margin-top: 16px; }
 .ok { color: var(--ok); }
 [hidden] { display: none !important; }

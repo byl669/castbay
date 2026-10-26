@@ -11,7 +11,7 @@ use castbay_encode::ffmpeg::{Codec, FfmpegEncoder};
 use castbay_encode::{bgra_to_nv12, Config, Encoded};
 use castbay_link::{Event, SendResult, Session};
 
-use crate::{OnStatus, Options, Report, Status};
+use crate::{Failure, OnStatus, Options, Report, Status};
 
 /// The encoder library inside this process when it was built in, else an FFmpeg child process.
 enum Enc {
@@ -72,7 +72,7 @@ struct State {
     bytes: u64,
     reconnects: u64,
     /// The cast cannot go on; the text says why.
-    failed: Option<String>,
+    failed: Option<Failure>,
     /// The receiver ended the cast on purpose.
     ended: Option<String>,
     /// The connection broke; the reconnect thread is getting a new one.
@@ -94,7 +94,7 @@ fn push(st: &mut State, link: &Session, captured: Instant, started: Instant, con
         match Enc::open(config, codec) {
             Ok(e) => st.encoder = Some(e),
             Err(e) => {
-                st.failed = Some(e.to_string());
+                st.failed = Some(Failure::new("encoder", e.to_string()));
                 return;
             }
         }
@@ -125,23 +125,23 @@ fn push(st: &mut State, link: &Session, captured: Instant, started: Instant, con
                 }
             }
         }
-        Err(e) => st.failed = Some(e.to_string()),
+        Err(e) => st.failed = Some(Failure::new("encoder", e.to_string())),
     }
 }
 
 /// Runs the cast and delivers its result through `done`. The thread that calls this ends up
 /// running the capture itself (the capture library wants to own its thread's message loop), so
 /// a supervisor thread watches for the end and reports it.
-pub fn run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, done: std::sync::mpsc::Sender<Result<Report, String>>) {
+pub fn run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, done: std::sync::mpsc::Sender<Result<Report, Failure>>) {
     if let Err(e) = setup_and_run(options, on_status, code, stop, done.clone()) {
         let _ = done.send(Err(e));
     }
 }
 
-fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, done: std::sync::mpsc::Sender<Result<Report, String>>) -> Result<(), String> {
+fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, done: std::sync::mpsc::Sender<Result<Report, Failure>>) -> Result<(), Failure> {
     let Options { addr, receiver_id, name, password, target, fps, bitrate_bps, codec, data_dir, max_duration } = options;
     on_status(Status::Connecting);
-    let runtime = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| Failure::new("other", e.to_string()))?;
 
     // The first picture fixes the size, so the offer waits for it.
     let first = Arc::new(Mutex::new(None::<(u32, u32)>));
@@ -160,15 +160,15 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
             break size;
         }
         if stop.load(Ordering::SeqCst) {
-            return Err("stopped".into());
+            return Err(Failure::new("stopped", "stopped"));
         }
         if waited.elapsed() > Duration::from_secs(10) {
-            return Err("no picture from the screen (is it locked, or the window gone?)".into());
+            return Err(Failure::new("no_picture", "no picture from the screen (is it locked, or the window gone?)"));
         }
         std::thread::sleep(Duration::from_millis(50));
     };
 
-    let identity = castbay_link::Identity::load_or_create(&data_dir).map_err(|e| e.to_string())?;
+    let identity = castbay_link::Identity::load_or_create(&data_dir).map_err(Failure::from)?;
     let mut pins = castbay_link::Pins::load(&data_dir);
     let link_config = castbay_link::Config {
         name,
@@ -188,7 +188,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
     };
     let session = runtime
         .block_on(castbay_link::connect(addr, &identity, &mut pins, receiver_id.as_deref(), &link_config, &mut ask))
-        .map_err(|e| e.to_string())?;
+        .map_err(Failure::from)?;
     on_status(Status::Casting { receiver: session.receiver_name.clone(), width, height });
 
     let started = Instant::now();
@@ -302,7 +302,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
                         st.reconnects += 1;
                         on_status(Status::Reconnected);
                     }
-                    None => st.failed = Some("the receiver could not be reached again".into()),
+                    None => st.failed = Some(Failure::new("network", "the receiver could not be reached again")),
                 }
             }
         })
@@ -368,7 +368,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
             state.lock().unwrap().ended.get_or_insert_with(|| "the captured window or screen went away".into());
         }
         Err(e) => {
-            state.lock().unwrap().failed.get_or_insert_with(|| e.to_string());
+            state.lock().unwrap().failed.get_or_insert_with(|| Failure::new("capture", e.to_string()));
         }
         Ok(_) => {}
     }
@@ -378,10 +378,10 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
 }
 
 /// Builds the report of a finished cast and announces its end.
-fn report(state: &Arc<Mutex<State>>, started: Instant, stop: &Arc<AtomicBool>, on_status: &OnStatus) -> Result<Report, String> {
+fn report(state: &Arc<Mutex<State>>, started: Instant, stop: &Arc<AtomicBool>, on_status: &OnStatus) -> Result<Report, Failure> {
     let mut st = state.lock().unwrap();
-    let ended = if let Some(reason) = st.failed.clone() {
-        reason
+    let ended = if let Some(failure) = st.failed.clone() {
+        failure.detail
     } else if let Some(reason) = st.ended.clone() {
         reason
     } else if stop.load(Ordering::SeqCst) {

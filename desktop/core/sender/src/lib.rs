@@ -66,13 +66,50 @@ pub struct Report {
     pub ended: String,
 }
 
+/// Why a cast could not start or had to stop. `code` is stable (for the app to word it for a
+/// person); `detail` is for logs.
+#[derive(Debug, Clone)]
+pub struct Failure {
+    /// `busy`, `blocked`, `approval_needed`, `locked`, `wrong_password`, `unsupported`,
+    /// `wrong_code`, `code_required`, `receiver_changed`, `network`, `protocol`, `no_picture`,
+    /// `encoder`, `capture`, `stopped` or `other`.
+    pub code: String,
+    pub detail: String,
+}
+
+impl Failure {
+    pub fn new(code: &str, detail: impl Into<String>) -> Failure {
+        Failure { code: code.into(), detail: detail.into() }
+    }
+}
+
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.detail)
+    }
+}
+
+impl From<castbay_link::Error> for Failure {
+    fn from(e: castbay_link::Error) -> Failure {
+        use castbay_link::Error as E;
+        let code = match &e {
+            E::Rejected(reason) | E::PairingFailed(reason) => reason.clone(),
+            E::CodeRequired => "code_required".into(),
+            E::ReceiverChanged => "receiver_changed".into(),
+            E::Protocol(_) => "protocol".into(),
+            E::Io(_) => "network".into(),
+        };
+        Failure { code, detail: e.to_string() }
+    }
+}
+
 pub type OnStatus = Arc<dyn Fn(Status) + Send + Sync>;
 
 /// A running cast.
 pub struct Handle {
     stop: Arc<std::sync::atomic::AtomicBool>,
-    result: std::sync::mpsc::Receiver<Result<Report, String>>,
-    finished: std::cell::Cell<Option<Result<Report, String>>>,
+    result: std::sync::mpsc::Receiver<Result<Report, Failure>>,
+    finished: std::cell::Cell<Option<Result<Report, Failure>>>,
 }
 
 /// Ends a cast from anywhere (the handle itself is busy being waited on).
@@ -96,11 +133,11 @@ impl Handle {
     }
 
     /// Waits for the cast to end and returns how it went.
-    pub fn join(self) -> Result<Report, String> {
+    pub fn join(self) -> Result<Report, Failure> {
         if let Some(done) = self.finished.take() {
             return done;
         }
-        self.result.recv().unwrap_or_else(|_| Err("the cast thread crashed".into()))
+        self.result.recv().unwrap_or_else(|_| Err(Failure::new("other", "the cast thread crashed")))
     }
 
     /// Whether the cast has ended (without waiting).
@@ -133,6 +170,22 @@ pub fn start(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) ->
 #[cfg(not(windows))]
 pub fn start(_: Options, _: OnStatus, _: Box<dyn FnMut(&str) -> Option<String> + Send>) -> Handle {
     let (tx, result) = std::sync::mpsc::channel();
-    let _ = tx.send(Err("casting is only implemented on Windows so far".to_string()));
+    let _ = tx.send(Err(Failure::new("other", "casting is only implemented on Windows so far")));
     Handle { stop: Arc::new(std::sync::atomic::AtomicBool::new(true)), result, finished: std::cell::Cell::new(None) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn link_errors_become_codes_the_app_can_word() {
+        use castbay_link::Error as E;
+        assert_eq!(Failure::from(E::Rejected("busy".into())).code, "busy");
+        assert_eq!(Failure::from(E::PairingFailed("wrong_code".into())).code, "wrong_code");
+        assert_eq!(Failure::from(E::CodeRequired).code, "code_required");
+        assert_eq!(Failure::from(E::ReceiverChanged).code, "receiver_changed");
+        assert_eq!(Failure::from(E::Io("x".into())).code, "network");
+        assert_eq!(Failure::from(E::Protocol("x".into())).code, "protocol");
+    }
 }
