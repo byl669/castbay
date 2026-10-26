@@ -86,7 +86,10 @@ jobs:
             echo
             echo "Run \"CastBay Desktop.exe\". It needs the Microsoft Edge WebView2 runtime (part of"
             echo "Windows 11 and recent Windows 10). Windows may ask to let it use the network: allow it"
-            echo "on private networks so receivers can be found."
+            echo "on private networks so receivers can be found. It is not code-signed yet, so SmartScreen"
+            echo "may warn: choose More info, then Run anyway."
+            echo
+            echo "Guide: https://github.com/${GITHUB_REPOSITORY}/blob/main/desktop/docs/user-guide.md"
             echo
             echo "Licence: GPL-3.0 (FFmpeg and x264 are built in). Source: https://github.com/${GITHUB_REPOSITORY}"
             echo "at commit $(git rev-parse HEAD); the libraries are the submodules under desktop/third_party:"
