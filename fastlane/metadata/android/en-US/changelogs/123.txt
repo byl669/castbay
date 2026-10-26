@@ -1,0 +1,2 @@
+• More reliable start: an error with Retry after 30 s, and up to three automatic restarts.
+• When a TV box's system service will not register, CastBay announces itself on the network so phones still find it.
