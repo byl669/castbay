@@ -24,22 +24,6 @@ class AirPlayManager private constructor(private val context: Context) {
         private const val HEARTBEAT_CHECK_MS = 1000L
         /** A heartbeat gap longer than this is written to the log and the diagnostics. */
         private const val HEARTBEAT_GAP_NOTE_MS = 3000L
-        /** Two heartbeats missed (they come every two seconds; the TCL's gaps stayed under 2.6 s). */
-        private const val HEARTBEAT_TIMEOUT_MS = 5000L
-        /**
-         * Music waits this long for a phone that went quiet: walking between the nodes of a mesh
-         * Wi-Fi (or out of a room) cut both its heartbeats and its audio for 8 s or more, and it
-         * connected again by itself after about 15 s. Mirroring stops at [HEARTBEAT_TIMEOUT_MS]:
-         * a frozen picture is not worth waiting for.
-         */
-        private const val HEARTBEAT_MUSIC_TIMEOUT_MS = 20_000L
-        /**
-         * Music still arriving means the phone is there: its heartbeats (TCP) can be held up for
-         * seconds while its audio (UDP) goes on.
-         */
-        private const val AUDIO_ALIVE_MS = 3000L
-        /** Even with music arriving, this long without a heartbeat is the end. */
-        private const val HEARTBEAT_HARD_TIMEOUT_MS = 30_000L
         private const val DLNA_PROGRESS_MS = 500L
         /** How long a finished DLNA video's screen waits for the next one ([StreamInfo.awaitingNext]). */
         private const val NEXT_VIDEO_WAIT_MS = 30_000L
@@ -705,13 +689,8 @@ class AirPlayManager private constructor(private val context: Context) {
                 (stream.isAudioOnly || stream.isMirroring)
             val now = android.os.SystemClock.elapsedRealtime()
             val silentMs = now - last
-            val audioAlive = stream.isAudioOnly && now - lastAudioAtMs < AUDIO_ALIVE_MS
-            val limit = when {
-                audioAlive -> HEARTBEAT_HARD_TIMEOUT_MS
-                stream.isAudioOnly -> HEARTBEAT_MUSIC_TIMEOUT_MS
-                else -> HEARTBEAT_TIMEOUT_MS
-            }
-            if (watched && silentMs > limit) {
+            val sinceAudio = if (lastAudioAtMs == 0L) null else now - lastAudioAtMs
+            if (watched && SenderSilence.gone(stream.isAudioOnly, silentMs, sinceAudio)) {
                 val audio = if (lastAudioAtMs == 0L) "no audio" else "audio last arrived ${now - lastAudioAtMs} ms ago"
                 Log.i(TAG, "No heartbeat from the AirPlay sender for $silentMs ms: it has gone ($audio; ${wifiSummary()})")
                 com.weenas.castbay.util.Diagnostics.record("heartbeat", "Gone after $silentMs ms ($audio; ${wifiSummary()})")
