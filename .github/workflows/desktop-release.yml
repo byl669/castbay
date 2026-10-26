@@ -3,11 +3,15 @@ name: Desktop release
 # Push a tag like desktop-v0.1.0 to build CastBay Desktop for Windows and publish it as a
 # pre-release, with its source (the sources of the libraries it contains are the submodules
 # under desktop/third_party). Run by hand (Actions > Desktop release > Run workflow) it builds
-# the same zip and keeps it as a build artifact only. `v*` tags are the Android release.
+# the same zip and keeps it as a build artifact only (so does a pull request that changes this
+# file or the FFmpeg build script). `v*` tags are the Android release.
 on:
   push:
     tags: ['desktop-v*']
   workflow_dispatch:
+  # A change to this file runs it too (as a build only), so it is tried before a tag needs it.
+  pull_request:
+    paths: ['.github/workflows/desktop-release.yml', 'desktop/tools/build-ffmpeg.*']
 
 # Reads the repository; the publishing job asks for more below.
 permissions:
