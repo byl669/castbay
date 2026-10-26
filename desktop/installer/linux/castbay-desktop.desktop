@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=CastBay Desktop
+Name[zh_CN]=CastBay 投屏
+Comment=Cast your screen to CastBay receivers
+Comment[zh_CN]=把屏幕投到 CastBay 接收端
+Exec=castbay-desktop
+Icon=castbay-desktop
+Categories=AudioVideo;Video;Network;
+Terminal=false
