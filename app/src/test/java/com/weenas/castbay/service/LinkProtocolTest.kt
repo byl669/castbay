@@ -19,6 +19,15 @@ import java.io.DataInputStream
 class LinkProtocolTest {
     private fun reader(bytes: ByteArray) = DataInputStream(ByteArrayInputStream(bytes))
 
+    private fun assertProtocolError(bytes: ByteArray) {
+        try {
+            LinkProtocol.read(reader(bytes))
+            fail("must be a protocol error")
+        } catch (e: LinkProtocolException) {
+            // expected
+        }
+    }
+
     private fun controlBytes(json: String): ByteArray {
         val out = ByteArrayOutputStream()
         LinkProtocol.writeControl(out, JSONObject(json))
@@ -32,6 +41,32 @@ class LinkProtocolTest {
         message as LinkMessage.Control
         assertEquals("hello", message.type)
         assertEquals("PC", message.json.getString("name"))
+    }
+
+    @Test
+    fun `an audio message round trips with its time`() {
+        val frame = byteArrayOf(0x21, 0x10, 0x04, 0x60, 0x8c.toByte())
+        val message = LinkProtocol.read(reader(LinkProtocol.frameAudio(987_654_321L, frame)))
+        message as LinkMessage.Audio
+        assertEquals(987_654_321L, message.presentationTimeUs)
+        assertArrayEquals(frame, message.data)
+    }
+
+    @Test
+    fun `an audio message too short or too long is a protocol error`() {
+        // Shorter than its time stamp.
+        assertProtocolError(byteArrayOf(3, 0, 0, 0, 4, 1, 2, 3, 4))
+        // Larger than any AAC frame has a reason to be: refused before reading the body.
+        assertProtocolError(byteArrayOf(3, 0, 2, 0, 0))
+    }
+
+    @Test
+    fun `an AAC config is a few bytes of hex`() {
+        assertArrayEquals(byteArrayOf(0x11, 0x90.toByte()), com.weenas.castbay.service.desktop.LinkAudioPlayer.parseConfig("1190"))
+        assertNull(com.weenas.castbay.service.desktop.LinkAudioPlayer.parseConfig("119"))
+        assertNull(com.weenas.castbay.service.desktop.LinkAudioPlayer.parseConfig("zz90"))
+        assertNull(com.weenas.castbay.service.desktop.LinkAudioPlayer.parseConfig(""))
+        assertNull(com.weenas.castbay.service.desktop.LinkAudioPlayer.parseConfig("00".repeat(20)))
     }
 
     @Test

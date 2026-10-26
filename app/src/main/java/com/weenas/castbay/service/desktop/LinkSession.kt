@@ -51,6 +51,8 @@ class LinkSession(
         private set
     @Volatile private var started = false
     @Volatile private var closing = false
+    /** The sender's audio, when its offer carried some and this device can play it. */
+    @Volatile private var audio: LinkAudioPlayer? = null
     private var lastKeyRequest = 0L
     /**
      * One stream object, so the writes of different threads exclude each other. Taken after the
@@ -125,7 +127,9 @@ class LinkSession(
                 onAdmitted(this)
                 host.sessionStarted(this, deviceId, name, size.first, size.second, offer.optInt("fps", 30))
                 started = true
-                send(JSONObject().put("t", "accept"))
+                audio?.stop()
+                audio = offeredAudio(offer)
+                send(JSONObject().put("t", "accept").put("audio", audio != null))
                 startStats()
                 offer = relay(input) ?: break
             }
@@ -140,6 +144,8 @@ class LinkSession(
             Log.e(TAG, "Link session failed", error)
         } finally {
             closing = true
+            audio?.stop()
+            audio = null
             host.hideCode()
             runCatching { socket.close() }
             if (started) host.sessionEnded(this)
@@ -175,6 +181,7 @@ class LinkSession(
         while (true) {
             when (val message = LinkProtocol.read(input) ?: return null) {
                 is LinkMessage.Video -> if (!host.video(message.data, message.presentationTimeUs)) askForKeyFrame()
+                is LinkMessage.Audio -> audio?.feed(message.data, message.presentationTimeUs)
                 is LinkMessage.Control -> when (message.type) {
                     "offer" -> return message.json
                     "bye" -> return null
@@ -226,6 +233,13 @@ class LinkSession(
     private fun refuse(reason: String) {
         runCatching { send(JSONObject().put("t", "reject").put("reason", reason)) }
         Log.i(TAG, "Desktop sender refused: $reason")
+    }
+
+    /** Audio for the offer's `audio` object (`codec`, `sample_rate`, `channels`, `config`), or null: none offered or not playable. */
+    private fun offeredAudio(offer: JSONObject): LinkAudioPlayer? {
+        val wanted = offer.optJSONObject("audio") ?: return null
+        if (wanted.optString("codec") != "aac") return null
+        return LinkAudioPlayer.create(wanted.optInt("sample_rate", 0), wanted.optInt("channels", 0), wanted.optString("config"))
     }
 
     /** The offer's size, or null if this receiver cannot take it. */
