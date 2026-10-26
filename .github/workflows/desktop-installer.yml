@@ -1,0 +1,60 @@
+name: Desktop installer
+
+# Builds the CastBay Desktop installer from the already released portable program and runs it
+# on the runner: install, install over, start, uninstall (desktop/installer/test-install.ps1). Quick,
+# so changes to the installer script are tried without rebuilding FFmpeg and the app.
+on:
+  push:
+    branches: [main]
+    paths: ['desktop/installer/**', '.github/workflows/desktop-installer.yml']
+  pull_request:
+    paths: ['desktop/installer/**', '.github/workflows/desktop-installer.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Get NSIS
+        run: choco install nsis --no-progress -y
+
+      # The installed program needs WebView2; the installer carries Microsoft's bootstrapper.
+      - name: Get the WebView2 bootstrapper
+        run: Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile "$env:RUNNER_TEMP\MicrosoftEdgeWebview2Setup.exe"
+
+      # The released program stands in for a fresh build.
+      - name: Get the released program
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download desktop-v0.1.0 --repo $env:GITHUB_REPOSITORY --pattern '*windows-x64.zip' --dir "$env:RUNNER_TEMP\release"
+          Expand-Archive "$env:RUNNER_TEMP\release\*.zip" -DestinationPath "$env:RUNNER_TEMP\release\unzipped"
+          $dir = Get-ChildItem "$env:RUNNER_TEMP\release\unzipped" -Directory | Select-Object -First 1
+          Copy-Item "$($dir.FullName)\CastBay Desktop.exe" "$env:RUNNER_TEMP\app.exe"
+          Copy-Item "$($dir.FullName)\LICENSE" "$env:RUNNER_TEMP\LICENSE"
+
+      - name: Build the installer
+        run: |
+          $setup = "$env:RUNNER_TEMP\CastBay-Desktop-0.1.0-windows-x64-setup.exe"
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" /V2 "/DVERSION=0.1.0" "/DAPP_EXE=$env:RUNNER_TEMP\app.exe" "/DWEBVIEW2_SETUP=$env:RUNNER_TEMP\MicrosoftEdgeWebview2Setup.exe" "/DLICENSE_FILE=$env:RUNNER_TEMP\LICENSE" "/DOUTFILE=$setup" desktop\installer\castbay-desktop.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
+          Get-Item $setup | Select-Object Name, Length
+          "SETUP=$setup" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Install, install over, start, uninstall
+        run: ./desktop/installer/test-install.ps1 -Setup $env:SETUP -Version 0.1.0
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CastBay-Desktop-installer-test
+          path: ${{ env.SETUP }}
+          retention-days: 7
