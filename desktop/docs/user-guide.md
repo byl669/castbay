@@ -49,6 +49,7 @@ Two ways, same program. / 两种方式，程序是同一个。
 | | |
 | --- | --- |
 | Quality / 画质 | Balanced 30 fps 8 Mbit/s; Smooth 60 fps 10 Mbit/s; Light 30 fps 4 Mbit/s. 均衡 / 流畅 / 省流 |
+| Bitrate / 码率 | The quality choice is the most it uses: when the connection cannot keep up the bitrate goes down by a third (down to a sixth of it), and it creeps back up after twenty calm seconds; the window shows the current bitrate. 画质选项是上限：网络跟不上时码率会降三成（最低降到上限的六分之一），平静二十秒后慢慢回升，窗口里会显示当前码率 |
 | Encoder / 编码器 | Automatic tries AMD, then NVIDIA, then the CPU (x264). 自动：依次尝试 AMD、NVIDIA、CPU |
 | Send sound too / 同时传声音 | The sound the PC plays is sent too (and still plays on the PC). 电脑播放的声音一起传过去 |
 | Start with Windows / 开机自启 | Starts with Windows and waits in the tray. 随 Windows 启动并在系统托盘待命 |

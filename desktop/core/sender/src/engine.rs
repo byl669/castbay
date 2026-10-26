@@ -12,6 +12,7 @@ use castbay_encode::scale::{bgra_to_nv12_fit, fit_size};
 use castbay_encode::{Config, Encoded};
 use castbay_link::{Event, SendResult, Session};
 
+use crate::rate::RateControl;
 use crate::{Failure, OnStatus, Options, Report, Status};
 
 /// The encoder library inside this process when it was built in, else an FFmpeg child process.
@@ -151,6 +152,11 @@ struct State {
     /// The receiver asked for a key frame.
     want_key: bool,
     last_report: Option<(i64, u64, f64)>,
+    /// Picks the bitrate; a change reopens the encoder (which starts with a key frame).
+    rate: RateControl,
+    announce_bitrate: Option<u32>,
+    bitrate_changes: u32,
+    simulated: bool,
     /// Pictures the capture delivered, and how many of them went to the encoder.
     frames_seen: u64,
     frames_taken: u64,
@@ -162,7 +168,8 @@ fn push(st: &mut State, link: &Session, captured: Instant, started: Instant, con
         return;
     }
     if st.encoder.is_none() {
-        match Enc::open(config, codec) {
+        let config = Config { bitrate_bps: st.rate.current(), ..config.clone() };
+        match Enc::open(&config, codec) {
             Ok(e) => st.encoder = Some(e),
             Err(e) => {
                 st.failed = Some(Failure::new("encoder", e.to_string()));
@@ -189,7 +196,10 @@ fn push(st: &mut State, link: &Session, captured: Instant, started: Instant, con
                 st.bytes += unit.data.len() as u64;
                 match link.send_video(unit.pts_us as u64, unit.key, &unit.data) {
                     SendResult::Sent => st.sent += 1,
-                    SendResult::Dropped => st.dropped += 1,
+                    SendResult::Dropped => {
+                        st.dropped += 1;
+                        st.rate.dropped(Instant::now());
+                    }
                     SendResult::Closed => {
                         st.lost.get_or_insert_with(|| "connection lost".into());
                     }
@@ -197,6 +207,19 @@ fn push(st: &mut State, link: &Session, captured: Instant, started: Instant, con
             }
         }
         Err(e) => st.failed = Some(Failure::new("encoder", e.to_string())),
+    }
+    // For trying the response without a bad network: a burst of drops five seconds in.
+    if !st.simulated && std::env::var_os("CASTBAY_SIMULATE_CONGESTION").is_some() && started.elapsed() > Duration::from_secs(5) {
+        st.simulated = true;
+        for _ in 0..8 {
+            st.rate.dropped(Instant::now());
+        }
+    }
+    if let Some(bps) = st.rate.adjust(Instant::now()) {
+        st.encoder = None;
+        st.want_key = true;
+        st.announce_bitrate = Some(bps);
+        st.bitrate_changes += 1;
     }
 }
 
@@ -271,6 +294,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
     // Awake for as long as this thread (which ends up running the capture) casts.
     let _awake = crate::power::Awake::new();
     let audio_accepted = session.audio_accepted;
+    on_status(Status::Bitrate(bitrate_bps));
 
     let started = Instant::now();
     let interval = Duration::from_micros(1_000_000 / fps as u64);
@@ -298,6 +322,10 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
         lost: None,
         want_key: false,
         last_report: None,
+        rate: RateControl::new(bitrate_bps, Instant::now()),
+        announce_bitrate: None,
+        bitrate_changes: 0,
+        simulated: false,
         frames_seen: 0,
         frames_taken: 0,
     }));
@@ -354,6 +382,9 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
             }
             if st.have_picture && st.last.elapsed() >= interval {
                 push(&mut st, link, Instant::now(), started, &config, codec, true);
+                if let Some(bps) = st.announce_bitrate.take() {
+                    on_status(Status::Bitrate(bps));
+                }
             }
         })
     };
@@ -448,6 +479,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
     };
     let result = {
         let (state, session_ref, over) = (state.clone(), session_ref.clone(), over.clone());
+        let capture_status = on_status.clone();
         castbay_capture::windows::run(&target, move |frame| {
             if over() {
                 return false;
@@ -466,6 +498,9 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
                     st.frames_taken += 1;
                     if let Some(link) = session_ref.lock().unwrap().as_ref() {
                         push(&mut st, link, Instant::now(), started, &encoder_config, codec, false);
+                        if let Some(bps) = st.announce_bitrate.take() {
+                            capture_status(Status::Bitrate(bps));
+                        }
                     }
                 }
             }
@@ -513,6 +548,8 @@ fn report(state: &Arc<Mutex<State>>, started: Instant, stop: &Arc<AtomicBool>, o
         pictures_seen: st.frames_seen,
         pictures_taken: st.frames_taken,
         audio_frames,
+        final_bitrate_bps: st.rate.current(),
+        bitrate_changes: st.bitrate_changes,
         ended: ended.clone(),
     };
     match &st.failed {
