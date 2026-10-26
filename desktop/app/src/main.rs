@@ -11,6 +11,9 @@ use std::time::Duration;
 use castbay_sender::{Codec, Options, Status, Stopper, Target};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+mod settings;
+
+use settings::Settings;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
@@ -46,6 +49,9 @@ fn utc(secs: u64) -> String {
     format!("{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}Z", rest / 3600, rest % 3600 / 60, rest % 60)
 }
 
+/// The person's choices, loaded at start and rewritten when they change.
+struct SettingsState(Mutex<Settings>);
+
 #[derive(Default)]
 struct Casting {
     stopper: Mutex<Option<Stopper>>,
@@ -80,12 +86,6 @@ struct StartArgs {
     kind: String,
     /// A monitor index, or part of a window title.
     value: String,
-    /// `smooth`, `balanced` or `saver`.
-    quality: String,
-    /// `auto`, `amf`, `nvenc` or `x264`.
-    encoder: String,
-    /// Send the PC's sound too.
-    audio: bool,
 }
 
 /// Looks for receivers for a few seconds.
@@ -137,7 +137,8 @@ fn status_json(status: &Status) -> serde_json::Value {
 }
 
 #[tauri::command]
-fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>) -> Result<(), String> {
+fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>, settings: State<'_, SettingsState>) -> Result<(), String> {
+    let settings = settings.0.lock().unwrap().clone();
     if state.stopper.lock().unwrap().is_some() {
         return Err("already casting".into());
     }
@@ -145,12 +146,8 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>) -> Res
         "window" => Target::Window(args.value.clone()),
         _ => Target::Monitor(args.value.parse().unwrap_or(0)),
     };
-    let (fps, bitrate_bps) = match args.quality.as_str() {
-        "smooth" => (60, 10_000_000),
-        "saver" => (30, 4_000_000),
-        _ => (30, 8_000_000),
-    };
-    let codec = match args.encoder.as_str() {
+    let (fps, bitrate_bps) = settings.quality_params();
+    let codec = match settings.encoder.as_str() {
         "auto" => None,
         name => Some(Codec::parse(name).ok_or("unknown encoder")?),
     };
@@ -165,7 +162,7 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>) -> Res
         fps,
         bitrate_bps,
         codec,
-        audio: args.audio,
+        audio: settings.send_audio,
         max_size: (1920, 1080),
         data_dir,
         max_duration: None,
@@ -182,7 +179,7 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>) -> Res
         }
         let _ = emitter.emit("status", status_json(&status));
     });
-    log(&app, &format!("start: {}:{} {} {} {} {}", args.ip, args.port, args.kind, args.quality, args.encoder, args.value));
+    log(&app, &format!("start: {}:{} {} {} {} {}", args.ip, args.port, args.kind, settings.quality, settings.encoder, args.value));
     let handle = castbay_sender::start(options, on_status, ask);
     *state.stopper.lock().unwrap() = Some(handle.stopper());
 
@@ -207,6 +204,38 @@ fn submit_code(code: Option<String>, state: State<'_, Casting>) {
     if let Some(tx) = state.code.lock().unwrap().as_ref() {
         let _ = tx.send(code.map(|c| c.trim().to_string()));
     }
+}
+
+/// What the person chose so far.
+#[tauri::command]
+fn get_settings(settings: State<'_, SettingsState>) -> Settings {
+    settings.0.lock().unwrap().clone()
+}
+
+/// Changes the fields named in `patch` and keeps them; returns all settings as they are now.
+#[tauri::command]
+fn set_settings(patch: serde_json::Value, app: AppHandle, settings: State<'_, SettingsState>) -> Result<Settings, String> {
+    let mut current = settings.0.lock().unwrap();
+    let mut next = current.clone();
+    next.apply(&patch)?;
+    next.save(&app.path().app_data_dir().map_err(|e| e.to_string())?)?;
+    *current = next.clone();
+    Ok(next)
+}
+
+#[derive(Serialize)]
+struct PairedView {
+    id: String,
+    name: String,
+    /// When it was last connected to, Unix seconds (0 when unknown).
+    seen: u64,
+}
+
+/// The receivers this PC has paired with.
+#[tauri::command]
+fn list_paired(app: AppHandle) -> Result<Vec<PairedView>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(castbay_link::Pins::load(&dir).list().into_iter().map(|r| PairedView { id: r.id, name: r.name, seen: r.seen }).collect())
 }
 
 /// Forgets a receiver's pinned key, for when it was reset and is the same device again.
@@ -361,7 +390,9 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .manage(Casting::default())
         .setup(|app| {
-            let zh = chinese();
+            let loaded = Settings::load(&app.path().app_data_dir().unwrap_or_default());
+            let zh = loaded.chinese(chinese());
+            app.manage(SettingsState(Mutex::new(loaded)));
             let open = MenuItem::with_id(app, "open", if zh { "打开 CastBay Desktop" } else { "Open CastBay Desktop" }, true, None::<&str>)?;
             let stop = MenuItem::with_id(app, "stop", if zh { "停止投屏" } else { "Stop casting" }, true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", if zh { "退出" } else { "Quit" }, true, None::<&str>)?;
@@ -401,7 +432,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, autostart_get, autostart_set])
+        .invoke_handler(tauri::generate_handler![get_settings, set_settings, list_paired, discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, autostart_get, autostart_set])
         .run(tauri::generate_context!())
         .expect("the CastBay Desktop window failed to start");
 }

@@ -7,6 +7,6 @@ mod protocol;
 mod session;
 
 pub use discovery::{browse, PairMode, Receiver};
-pub use identity::{Identity, Pins};
+pub use identity::{Identity, PinnedReceiver, Pins};
 pub use protocol::{verification_code, Error};
 pub use session::{connect, AudioOffer, Config, Event, PairingCode, SendResult, Session};
