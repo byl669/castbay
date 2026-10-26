@@ -1,0 +1,104 @@
+name: Desktop release
+
+# Push a tag like desktop-v0.1.0 to build CastBay Desktop for Windows and publish it as a
+# pre-release, with its source (the sources of the libraries it contains are the submodules
+# under desktop/third_party). Run by hand (Actions > Desktop release > Run workflow) it builds
+# the same zip and keeps it as a build artifact only. `v*` tags are the Android release.
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+
+# Reads the repository; the publishing job asks for more below.
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      # Creating the release and uploading its files (only on a tag).
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      # Only the desktop submodules; the Android ones (OpenSSL, UxPlay, ...) aren't needed.
+      - name: Fetch the desktop submodules
+        run: git submodule update --init --depth 1 -- desktop/third_party/FFmpeg desktop/third_party/x264 desktop/third_party/nv-codec-headers desktop/third_party/AMF
+
+      # FFmpeg and x264 take a while to build: kept until a submodule or the build script changes.
+      - name: Note the submodule commits
+        id: libs
+        run: echo "commits=$(git ls-tree HEAD desktop/third_party/ | awk '{print $3}' | tr -d '\n')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffmpeg
+        with:
+          path: desktop/build/ffmpeg
+          key: ffmpeg-${{ hashFiles('desktop/tools/build-ffmpeg.*') }}-${{ steps.libs.outputs.commits }}
+
+      - name: Build FFmpeg and x264 from the submodules
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        env:
+          MSYS2_ROOT: C:\msys64
+        run: |
+          /c/msys64/usr/bin/pacman -S --noconfirm --needed make diffutils nasm pkgconf perl gawk git
+          cmd //c "desktop\\tools\\build-ffmpeg.cmd"
+
+      - name: Build CastBay Desktop
+        working-directory: desktop
+        run: cargo build --release --locked -p castbay-desktop --features ffmpeg-lib
+
+      - name: Package
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/desktop-v*) VERSION="${GITHUB_REF_NAME#desktop-v}" ;;
+            *) VERSION="dev-$(git rev-parse --short HEAD)" ;;
+          esac
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          dir="CastBay-Desktop-$VERSION-windows-x64"
+          mkdir -p "dist/$dir"
+          cp desktop/target/release/castbay-desktop.exe "dist/$dir/CastBay Desktop.exe"
+          cp LICENSE* "dist/$dir/" 2>/dev/null || true
+          {
+            echo "CastBay Desktop $VERSION"
+            echo
+            echo "Run \"CastBay Desktop.exe\". It needs the Microsoft Edge WebView2 runtime (part of"
+            echo "Windows 11 and recent Windows 10). Windows may ask to let it use the network: allow it"
+            echo "on private networks so receivers can be found."
+            echo
+            echo "Licence: GPL-3.0 (FFmpeg and x264 are built in). Source: https://github.com/${GITHUB_REPOSITORY}"
+            echo "at commit $(git rev-parse HEAD); the libraries are the submodules under desktop/third_party:"
+            git submodule status -- desktop/third_party | sed 's/^[ +-]//'
+          } > "dist/$dir/README.txt"
+          (cd dist && 7z a -tzip "$dir.zip" "$dir" > /dev/null)
+          # The corresponding source, with the libraries it contains (AMF only supplies headers).
+          tar --exclude=.git --exclude='*/.git' --exclude=desktop/target --exclude=desktop/build \
+            --exclude=desktop/third_party/AMF \
+            -czf "dist/CastBay-Desktop-$VERSION-source.tar.gz" desktop LICENSE* 2>/dev/null || \
+          tar --exclude=.git --exclude='*/.git' --exclude=desktop/target --exclude=desktop/build \
+            --exclude=desktop/third_party/AMF \
+            -czf "dist/CastBay-Desktop-$VERSION-source.tar.gz" desktop
+          ls -la dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CastBay-Desktop-${{ env.VERSION }}
+          path: dist/*.zip
+          retention-days: 14
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/CastBay-Desktop-$VERSION-windows-x64.zip" \
+            "dist/CastBay-Desktop-$VERSION-source.tar.gz" \
+            --title "CastBay Desktop $VERSION" --prerelease \
+            --notes "CastBay Desktop $VERSION for Windows 10/11 (64-bit): unzip and run \"CastBay Desktop.exe\". Casts a screen or window to CastBay receivers; turn on CastBay Desktop in the receiver's settings first."
