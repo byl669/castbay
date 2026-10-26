@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CastBay Desktop installer (WiX 4, MSI).
+
+  Per-user: installs to %LOCALAPPDATA%\Programs\CastBay Desktop without administrator rights, adds a
+  Start menu entry and an entry in Settings > Apps. A newer version installs over an older one and
+  keeps the person's pairings (they live in %APPDATA%, outside the installed files). An MSI has no
+  uninstaller program of its own (Windows Installer does it), which keeps antivirus heuristics that
+  distrust small unsigned installer stubs quiet.
+
+  wix build -arch x64 -ext WixToolset.UI.wixext -culture <culture> -loc <culture>.wxl
+            -d Version=0.1.0 -d AppExe=... -d AppIcon=... -d LicenseTxt=... -d LicenseRtf=...
+            -sice ICE38 -sice ICE64 -sice ICE91 -o out.msi castbay-desktop.wxs
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="CastBay Desktop" Manufacturer="CastBay" Version="$(Version)" Language="$(Lcid)"
+           UpgradeCode="7C3D6A52-4B1E-4F0B-9D52-6E1A0B8F2C47" Scope="perUser" InstallerVersion="500">
+    <MajorUpgrade DowngradeErrorMessage="!(loc.Downgrade)" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="AppIcon" SourceFile="$(AppIcon)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/weenas/castbay" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsDir" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="CastBay Desktop" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <Feature Id="Main" Title="CastBay Desktop" Level="1" AllowAbsent="no">
+      <ComponentRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="AppFiles" Guid="*">
+        <File Id="AppExe" Name="CastBay Desktop.exe" Source="$(AppExe)" />
+        <File Id="LicenseTxt" Name="LICENSE.txt" Source="$(LicenseTxt)" />
+        <RegistryValue Root="HKCU" Key="Software\CastBay Desktop" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="StartShortcut" Name="CastBay Desktop" Target="[#AppExe]" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
+        <RegistryValue Root="HKCU" Key="Software\CastBay Desktop" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- The program may be running, or sitting in the tray: close it so its file can be replaced. -->
+    <CustomAction Id="CloseApp" Directory="TARGETDIR" ExeCommand='taskkill.exe /F /IM "CastBay Desktop.exe"' Return="ignore" Execute="immediate" />
+    <!-- Removed (not upgraded): stop starting with Windows. An upgrade keeps that setting. -->
+    <CustomAction Id="RemoveAutostart" Directory="TARGETDIR" ExeCommand='cmd.exe /c reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v CastBayDesktop /f' Return="ignore" Execute="immediate" />
+    <!-- Upgraded: a start-with-Windows entry keeps pointing at the program, which has the same path. -->
+    <CustomAction Id="LaunchApp" Directory="INSTALLFOLDER" ExeCommand='"[INSTALLFOLDER]CastBay Desktop.exe"' Return="asyncNoWait" Impersonate="yes" />
+    <InstallExecuteSequence>
+      <Custom Action="CloseApp" Before="InstallValidate" />
+      <Custom Action="RemoveAutostart" After="InstallInitialize" Condition='REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE' />
+    </InstallExecuteSequence>
+
+    <WixVariable Id="WixUILicenseRtf" Value="$(LicenseRtf)" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="!(loc.LaunchText)" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApp" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+    </UI>
+  </Package>
+</Wix>

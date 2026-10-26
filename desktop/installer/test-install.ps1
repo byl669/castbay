@@ -1,39 +1,44 @@
-# Installs, upgrades over, and uninstalls the installer silently, checking what it leaves behind.
-# Usage: test-install.ps1 <path to ...-setup.exe> <expected version>
-param([Parameter(Mandatory)] [string] $Setup, [Parameter(Mandatory)] [string] $Version)
+# Installs, installs over, starts and uninstalls the MSI silently, checking what it leaves behind.
+# Usage: test-install.ps1 <path to the .msi> <expected version>
+param([Parameter(Mandatory)] [string] $Msi, [Parameter(Mandatory)] [string] $Version)
 $ErrorActionPreference = 'Stop'
 $dir = Join-Path $env:LOCALAPPDATA 'Programs\CastBay Desktop'
 $exe = Join-Path $dir 'CastBay Desktop.exe'
-$key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\CastBayDesktop'
 $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\CastBay Desktop.lnk'
+$log = Join-Path $env:TEMP 'castbay-msi.log'
 function Check($ok, $what) { if ($ok) { "ok: $what" } else { throw "FAILED: $what" } }
+function Arp { Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'CastBay Desktop' } }
+function Msiexec($args) {
+  $p = Start-Process msiexec.exe -ArgumentList $args -Wait -PassThru
+  if ($p.ExitCode -ne 0) { Get-Content $log -Tail 40 -ErrorAction SilentlyContinue; throw "msiexec $args exited $($p.ExitCode)" }
+}
 
 foreach ($round in 1, 2) {
-  $p = Start-Process $Setup -ArgumentList '/S' -Wait -PassThru
-  Check ($p.ExitCode -eq 0) "install round $round exits 0"
-  Check (Test-Path $exe) 'program installed'
-  Check (Test-Path (Join-Path $dir 'Uninstall.exe')) 'uninstaller installed'
+  Msiexec "/i `"$Msi`" /qn /l*v `"$log`""
+  Check (Test-Path $exe) "program installed (round $round)"
   Check (Test-Path $lnk) 'Start menu shortcut'
-  $item = Get-ItemProperty $key
-  Check ($item.DisplayVersion -eq $Version) "Settings > Apps shows version $Version"
-  Check ($item.DisplayName -eq 'CastBay Desktop') 'Settings > Apps shows the name'
+  $entry = Arp
+  Check ($null -ne $entry) 'Settings > Apps entry'
+  Check ($entry.DisplayVersion -eq $Version) "Settings > Apps shows version $Version"
   Check ((Get-Item $exe).Length -gt 1MB) 'program is not empty'
 }
+
+# A start-with-Windows entry survives an upgrade and is removed by an uninstall.
+$run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+Set-ItemProperty $run -Name CastBayDesktop -Value "`"$exe`" --minimized"
+Msiexec "/i `"$Msi`" /qn /l*v `"$log`""
+Check ($null -ne (Get-ItemProperty $run -Name CastBayDesktop -ErrorAction SilentlyContinue)) 'installing over keeps start-with-Windows'
 
 # The program starts and stays up for a few seconds (needs WebView2, which the runner has).
 $app = Start-Process $exe -PassThru
 Start-Sleep 8
 Check (-not $app.HasExited) 'program keeps running after start'
-$app.CloseMainWindow() | Out-Null
-Start-Sleep 2
-if (-not $app.HasExited) { $app.Kill() }
 
-# Uninstall as a person would: the uninstaller copies itself to a temporary folder, runs from there
-# (so it can delete its own file and folder) and the first process returns at once. Wait for it.
-Start-Process (Join-Path $dir 'Uninstall.exe') -ArgumentList '/S' | Out-Null
-for ($i = 0; $i -lt 60 -and (Test-Path $dir); $i++) { Start-Sleep 1 }
+# Uninstalling closes the running program, then removes everything.
+Msiexec "/x `"$Msi`" /qn /l*v `"$log`""
 Check (-not (Test-Path $exe)) 'program removed'
 Check (-not (Test-Path $lnk)) 'Start menu shortcut removed'
-Check (-not (Test-Path $key)) 'Settings > Apps entry removed'
+Check ($null -eq (Arp)) 'Settings > Apps entry removed'
+Check ($null -eq (Get-ItemProperty $run -Name CastBayDesktop -ErrorAction SilentlyContinue)) 'start-with-Windows entry removed'
 Check (-not (Test-Path $dir)) 'install folder removed'
 'installer test passed'

@@ -319,7 +319,41 @@ fn autostart_set(on: bool, app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the Microsoft Edge WebView2 runtime, which draws the window, is on this PC.
+#[cfg(windows)]
+fn webview2_installed() -> bool {
+    [
+        r"HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+        r"HKCU\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
+    ]
+    .iter()
+    .any(|key| reg(&["query", key, "/v", "pv"]).map(|s| s.success()).unwrap_or(false))
+}
+
+/// Says what is missing and offers the download, instead of failing without a word.
+#[cfg(windows)]
+fn webview2_missing() {
+    use windows::core::HSTRING;
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, IDYES, MB_ICONWARNING, MB_YESNO};
+    let (title, text) = if chinese() {
+        ("CastBay Desktop", "需要先安装 Microsoft Edge WebView2 运行库才能显示窗口（Windows 11 和较新的 Windows 10 已自带）。\n\n现在打开下载页面吗？")
+    } else {
+        ("CastBay Desktop", "The Microsoft Edge WebView2 runtime is needed to show the window (it is part of Windows 11 and recent Windows 10).\n\nOpen the download page now?")
+    };
+    let answer = unsafe { MessageBoxW(None, &HSTRING::from(text), &HSTRING::from(title), MB_YESNO | MB_ICONWARNING) };
+    if answer == IDYES {
+        let _ = std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", "https://go.microsoft.com/fwlink/p/?LinkId=2124703"])
+            .spawn();
+    }
+}
+
 fn main() {
+    #[cfg(windows)]
+    if !webview2_installed() {
+        webview2_missing();
+        return;
+    }
     tauri::Builder::default()
         // A second launch (the shortcut again, Windows startup) brings the first one forward.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
