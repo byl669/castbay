@@ -96,6 +96,7 @@ dependencies = [
 name = "castbay-encode"
 version = "0.0.0"
 dependencies = [
+ "cc",
  "windows",
 ]
 
