@@ -1,0 +1,22 @@
+[package]
+name = "castbay-desktop"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "CastBay Desktop: cast a Windows screen or window to CastBay receivers"
+
+[features]
+# Encode with the FFmpeg libraries built in (tools/build-ffmpeg) instead of an FFmpeg process.
+ffmpeg-lib = ["castbay-sender/ffmpeg-lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+castbay-capture = { path = "../core/capture" }
+castbay-link = { path = "../core/link" }
+castbay-sender = { path = "../core/sender" }

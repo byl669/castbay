@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CastBay Desktop</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1 data-i18n="title">CastBay Desktop</h1>
+    <p class="sub" data-i18n="subtitle">Cast this PC's screen or a window to a CastBay receiver.</p>
+  </header>
+
+  <section id="setup">
+    <div class="row head">
+      <h2 data-i18n="receivers">Receivers</h2>
+      <button id="refresh" class="link" data-i18n="refresh">Refresh</button>
+    </div>
+    <ul id="receiver-list" class="list" role="listbox"></ul>
+    <p id="receiver-empty" class="hint" hidden data-i18n="none_found">No receiver found. Open CastBay on the TV or tablet and turn on "CastBay Desktop" in its settings; both must be on the same network.</p>
+    <label id="password-row" hidden>
+      <span data-i18n="password">Receiver password</span>
+      <input id="password" type="password" autocomplete="off">
+    </label>
+
+    <h2 data-i18n="what">What to cast</h2>
+    <div class="seg" role="radiogroup">
+      <label><input type="radio" name="kind" value="monitor" checked><span data-i18n="screen">A screen</span></label>
+      <label><input type="radio" name="kind" value="window"><span data-i18n="window">A window</span></label>
+    </div>
+    <select id="source" aria-label="Source"></select>
+
+    <div class="two">
+      <label>
+        <span data-i18n="quality">Quality</span>
+        <select id="quality">
+          <option value="balanced" data-i18n="q_balanced">Balanced (30 fps, 8 Mbit/s)</option>
+          <option value="smooth" data-i18n="q_smooth">Smooth (60 fps, 10 Mbit/s)</option>
+          <option value="saver" data-i18n="q_saver">Light (30 fps, 4 Mbit/s)</option>
+        </select>
+      </label>
+      <label>
+        <span data-i18n="encoder">Encoder</span>
+        <select id="encoder">
+          <option value="auto" data-i18n="e_auto">Automatic</option>
+          <option value="amf">AMD</option>
+          <option value="nvenc">NVIDIA</option>
+          <option value="x264" data-i18n="e_cpu">CPU (x264)</option>
+        </select>
+      </label>
+    </div>
+
+    <button id="start" class="primary" disabled data-i18n="start">Start casting</button>
+  </section>
+
+  <section id="session" hidden>
+    <div class="card">
+      <p id="state-line" class="big"></p>
+      <p id="detail-line" class="hint"></p>
+      <div id="code-box" hidden>
+        <p data-i18n="code_prompt">Type the 6-digit code shown on the receiver.</p>
+        <div class="row">
+          <input id="code" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="000000">
+          <button id="code-ok" class="primary" data-i18n="ok">OK</button>
+        </div>
+      </div>
+      <dl id="stats" hidden>
+        <div><dt data-i18n="s_decode">Receiver decode</dt><dd id="s-decode">–</dd></div>
+        <div><dt data-i18n="s_fps">Receiver fps</dt><dd id="s-fps">–</dd></div>
+        <div><dt data-i18n="s_dropped">Dropped</dt><dd id="s-dropped">–</dd></div>
+      </dl>
+    </div>
+    <button id="stop" class="danger" data-i18n="stop">Stop casting</button>
+  </section>
+
+  <p id="error" class="error" role="alert" hidden></p>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

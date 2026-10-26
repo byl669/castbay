@@ -128,5 +128,20 @@ pub fn monitors() -> Result<Vec<String>, Error> {
         .collect())
 }
 
+/// Titles of the windows that can be captured, for the picker.
+pub fn windows() -> Result<Vec<String>, Error> {
+    let windows = Window::enumerate().map_err(|e| Error::Platform(e.to_string()))?;
+    let mut titles: Vec<String> = windows
+        .iter()
+        .filter(|w| w.is_valid())
+        .filter_map(|w| w.title().ok())
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    titles.sort();
+    titles.dedup();
+    Ok(titles)
+}
+
 #[allow(dead_code)]
 fn _unused(_: Duration) {}
