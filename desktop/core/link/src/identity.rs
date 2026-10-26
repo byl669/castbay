@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair, PKCS_ECDSA_P256_SHA256};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::protocol::Error;
@@ -71,11 +72,55 @@ fn write_private(path: &Path, bytes: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 
+/// One receiver as the file keeps it. Files written before names were kept hold just the key.
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+enum Entry {
+    Key(String),
+    Known(Known),
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct Known {
+    fp: String,
+    #[serde(default)]
+    name: String,
+    /// When the receiver was last connected to, in Unix seconds.
+    #[serde(default)]
+    seen: u64,
+}
+
+impl Entry {
+    fn fp(&self) -> &str {
+        match self {
+            Entry::Key(fp) => fp,
+            Entry::Known(k) => &k.fp,
+        }
+    }
+
+    fn known(&self) -> Known {
+        match self {
+            Entry::Key(fp) => Known { fp: fp.clone(), ..Known::default() },
+            Entry::Known(k) => k.clone(),
+        }
+    }
+}
+
+/// A receiver that was paired with, as listed to the person.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinnedReceiver {
+    pub id: String,
+    /// What the receiver called itself last time (empty for pairings from before names were kept).
+    pub name: String,
+    /// When it was last connected to, in Unix seconds (0 when not known).
+    pub seen: u64,
+}
+
 /// Receivers this sender has paired with, by their id: the key each presented, to be
 /// presented again. A receiver whose key changes is not the same receiver.
 pub struct Pins {
     path: PathBuf,
-    map: HashMap<String, String>,
+    map: HashMap<String, Entry>,
 }
 
 impl Pins {
@@ -86,7 +131,7 @@ impl Pins {
     }
 
     pub fn get(&self, receiver_id: &str) -> Option<[u8; 32]> {
-        let text = self.map.get(receiver_id)?;
+        let text = self.map.get(receiver_id)?.fp();
         let mut out = [0u8; 32];
         if text.len() != 64 {
             return None;
@@ -97,14 +142,41 @@ impl Pins {
         Some(out)
     }
 
-    pub fn pin(&mut self, receiver_id: &str, fingerprint: &[u8; 32]) -> Result<(), Error> {
-        self.map.insert(receiver_id.to_string(), hex(fingerprint));
-        fs::write(&self.path, serde_json::to_vec_pretty(&self.map).expect("a map serialises"))?;
-        Ok(())
+    /// Remembers a receiver's key, its name (kept when `name` is empty) and that it was just seen.
+    pub fn pin(&mut self, receiver_id: &str, fingerprint: &[u8; 32], name: &str) -> Result<(), Error> {
+        let mut known = self.map.get(receiver_id).map(Entry::known).unwrap_or_default();
+        known.fp = hex(fingerprint);
+        if !name.is_empty() {
+            known.name = name.to_string();
+        }
+        known.seen = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        self.map.insert(receiver_id.to_string(), Entry::Known(known));
+        self.save()
     }
 
     pub fn forget(&mut self, receiver_id: &str) -> Result<(), Error> {
         self.map.remove(receiver_id);
+        self.save()
+    }
+
+    /// The receivers paired with, the most recently connected first.
+    pub fn list(&self) -> Vec<PinnedReceiver> {
+        let mut all: Vec<PinnedReceiver> = self
+            .map
+            .iter()
+            .map(|(id, e)| {
+                let k = e.known();
+                PinnedReceiver { id: id.clone(), name: k.name, seen: k.seen }
+            })
+            .collect();
+        all.sort_by(|a, b| b.seen.cmp(&a.seen).then_with(|| a.name.cmp(&b.name)).then_with(|| a.id.cmp(&b.id)));
+        all
+    }
+
+    fn save(&self) -> Result<(), Error> {
+        if let Some(dir) = self.path.parent() {
+            fs::create_dir_all(dir)?;
+        }
         fs::write(&self.path, serde_json::to_vec_pretty(&self.map).expect("a map serialises"))?;
         Ok(())
     }
@@ -138,10 +210,53 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let mut pins = Pins::load(&dir);
         assert!(pins.get("abc").is_none());
-        pins.pin("abc", &[7u8; 32]).unwrap();
+        pins.pin("abc", &[7u8; 32], "Living room TV").unwrap();
         assert_eq!(Pins::load(&dir).get("abc"), Some([7u8; 32]));
         pins.forget("abc").unwrap();
         assert!(Pins::load(&dir).get("abc").is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn names_are_kept_and_listed_newest_first() {
+        let dir = temp("pins-list");
+        fs::create_dir_all(&dir).unwrap();
+        let mut pins = Pins::load(&dir);
+        pins.pin("a", &[1u8; 32], "Bedroom").unwrap();
+        pins.pin("b", &[2u8; 32], "Living room").unwrap();
+        // Connecting again refreshes the time and keeps the name when none is given.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        pins.pin("a", &[1u8; 32], "").unwrap();
+        let list = Pins::load(&dir).list();
+        assert_eq!(list.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(list[0].name, "Bedroom");
+        assert!(list[0].seen > list[1].seen);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_file_from_before_names_were_kept_still_loads() {
+        let dir = temp("pins-old");
+        fs::create_dir_all(&dir).unwrap();
+        let key = "07".repeat(32);
+        fs::write(dir.join("receivers.json"), format!(r#"{{"abc": "{key}"}}"#)).unwrap();
+        let mut pins = Pins::load(&dir);
+        assert_eq!(pins.get("abc"), Some([7u8; 32]));
+        assert_eq!(pins.list(), vec![PinnedReceiver { id: "abc".into(), name: String::new(), seen: 0 }]);
+        // Meeting it again fills in the name; the file is then in the new format.
+        pins.pin("abc", &[7u8; 32], "Old TV").unwrap();
+        let reread = Pins::load(&dir);
+        assert_eq!(reread.get("abc"), Some([7u8; 32]));
+        assert_eq!(reread.list()[0].name, "Old TV");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_broken_file_is_an_empty_list_not_a_crash() {
+        let dir = temp("pins-bad");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("receivers.json"), b"not json").unwrap();
+        assert!(Pins::load(&dir).list().is_empty());
         let _ = fs::remove_dir_all(dir);
     }
 }
