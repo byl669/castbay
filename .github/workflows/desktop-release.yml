@@ -32,6 +32,18 @@ jobs:
         with:
           submodules: false
 
+      # A tag desktop-v0.1.0 must match the version in the code (the window shows it and checks
+      # for newer ones), as the Android release checks versionName.
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' desktop/app/Cargo.toml | head -1)"
+          tag="${GITHUB_REF_NAME#desktop-v}"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the app version $version (desktop/app/Cargo.toml and tauri.conf.json)"
+            exit 1
+          fi
+
       # Only the desktop submodules; the Android ones (OpenSSL, UxPlay, ...) aren't needed.
       - name: Fetch the desktop submodules
         run: git submodule update --init --depth 1 -- desktop/third_party/FFmpeg desktop/third_party/x264 desktop/third_party/nv-codec-headers desktop/third_party/AMF
