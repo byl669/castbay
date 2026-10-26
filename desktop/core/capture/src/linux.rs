@@ -4,7 +4,7 @@
 //! restore token, kept in the data folder) so the same share opens again without a dialog, and
 //! delivers the pictures as BGRA.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -38,7 +38,8 @@ fn platform(e: impl std::fmt::Display) -> Error {
 struct Share {
     node: u32,
     fd: OwnedFd,
-    _session: Box<dyn std::any::Any>,
+    /// Ends the portal session; without it the next session (the engine opens a second one) waits.
+    close: Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>>,
 }
 
 async fn open_portal(target: &Target) -> Result<Share, Error> {
@@ -75,13 +76,33 @@ async fn open_portal(target: &Target) -> Result<Share, Error> {
     }
     let node = response.streams().first().ok_or_else(|| Error::NotFound("nothing was shared".into()))?.pipe_wire_node_id();
     let fd = proxy.open_pipe_wire_remote(&session, Default::default()).await.map_err(platform)?;
-    Ok(Share { node, fd, _session: Box::new((proxy, session)) })
+    let close = Box::new(move || {
+        Box::pin(async move {
+            let _ = session.close().await;
+            drop(proxy);
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>
+    });
+    Ok(Share { node, fd, close })
 }
+
+/// The last picture, kept because the desktop sends none while nothing changes: the capture hands
+/// it on again after a quiet moment so the engine always has a picture to work with.
+#[derive(Default)]
+struct Saved {
+    width: u32,
+    height: u32,
+    stride: usize,
+    data: Vec<u8>,
+    at: Option<Instant>,
+}
+
+type OnFrame = Rc<RefCell<Box<dyn FnMut(Frame<'_>) -> bool + Send>>>;
 
 struct State {
     format: spa::param::video::VideoInfoRaw,
     started: Instant,
-    on_frame: Box<dyn FnMut(Frame<'_>) -> bool + Send>,
+    on_frame: OnFrame,
+    saved: Rc<RefCell<Saved>>,
     mainloop: pw::main_loop::MainLoopRc,
     ended: Rc<Cell<Option<Ended>>>,
     failure: Rc<Cell<Option<String>>>,
@@ -93,26 +114,41 @@ pub fn run(
     stop: impl Fn() -> bool + Send + 'static,
     on_frame: impl FnMut(Frame<'_>) -> bool + Send + 'static,
 ) -> Result<Ended, Error> {
-    // The runtime stays alive for the whole capture: the portal's session lives on it.
-    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().map_err(platform)?;
+    // One runtime for the whole process: the portal's D-Bus connection is shared and lives on the
+    // runtime that first used it, so a second capture (the engine opens one to learn the picture
+    // size) would hang if that runtime were gone.
+    let runtime = runtime()?;
     let share = runtime.block_on(open_portal(target))?;
-    let result = stream(share, stop, Box::new(on_frame));
-    drop(runtime);
+    let close = share.close;
+    let result = stream(share.node, share.fd, stop, Box::new(on_frame));
+    runtime.block_on(close());
     result
 }
 
-fn stream(share: Share, stop: impl Fn() -> bool + 'static, on_frame: Box<dyn FnMut(Frame<'_>) -> bool + Send>) -> Result<Ended, Error> {
+fn runtime() -> Result<&'static tokio::runtime::Runtime, Error> {
+    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    if let Some(runtime) = RUNTIME.get() {
+        return Ok(runtime);
+    }
+    let built = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().map_err(platform)?;
+    Ok(RUNTIME.get_or_init(|| built))
+}
+
+fn stream(node: u32, fd: OwnedFd, stop: impl Fn() -> bool + 'static, on_frame: Box<dyn FnMut(Frame<'_>) -> bool + Send>) -> Result<Ended, Error> {
     pw::init();
     let mainloop = pw::main_loop::MainLoopRc::new(None).map_err(platform)?;
     let context = pw::context::ContextRc::new(&mainloop, None).map_err(platform)?;
-    let core = context.connect_fd_rc(share.fd, None).map_err(platform)?;
+    let core = context.connect_fd_rc(fd, None).map_err(platform)?;
 
+    let on_frame: OnFrame = Rc::new(RefCell::new(on_frame));
+    let saved = Rc::new(RefCell::new(Saved::default()));
     let ended = Rc::new(Cell::new(None));
     let failure = Rc::new(Cell::new(None));
     let state = State {
         format: Default::default(),
         started: Instant::now(),
-        on_frame,
+        on_frame: on_frame.clone(),
+        saved: saved.clone(),
         mainloop: mainloop.clone(),
         ended: ended.clone(),
         failure: failure.clone(),
@@ -174,8 +210,17 @@ fn stream(share: Share, stop: impl Fn() -> bool + 'static, on_frame: Box<dyn FnM
                 return;
             }
             state.seen_picture = true;
+            {
+                let mut saved = state.saved.borrow_mut();
+                saved.width = size.width;
+                saved.height = size.height;
+                saved.stride = stride;
+                saved.data.clear();
+                saved.data.extend_from_slice(&bytes[..wanted]);
+                saved.at = Some(Instant::now());
+            }
             let frame = Frame { width: size.width, height: size.height, stride, data: &bytes[..wanted], timestamp: state.started.elapsed() };
-            if !(state.on_frame)(frame) {
+            if !(state.on_frame.borrow_mut())(frame) {
                 state.ended.set(Some(Ended::Stopped));
                 state.mainloop.quit();
             }
@@ -225,14 +270,25 @@ fn stream(share: Share, stop: impl Fn() -> bool + 'static, on_frame: Box<dyn FnM
         .into_inner();
     let mut params = [spa::pod::Pod::from_bytes(&bytes).ok_or_else(|| platform("the format request is not valid"))?];
     stream
-        .connect(spa::utils::Direction::Input, Some(share.node), pw::stream::StreamFlags::AUTOCONNECT | pw::stream::StreamFlags::MAP_BUFFERS, &mut params)
+        .connect(spa::utils::Direction::Input, Some(node), pw::stream::StreamFlags::AUTOCONNECT | pw::stream::StreamFlags::MAP_BUFFERS, &mut params)
         .map_err(platform)?;
 
     // A static desktop sends no pictures, but the person may still stop: look every 100 ms.
-    let looper = mainloop.clone();
+    let (looper, started, idle_ended) = (mainloop.clone(), Instant::now(), ended.clone());
     let timer = mainloop.loop_().add_timer(move |_| {
         if stop() {
             ended_stopped(&looper);
+            return;
+        }
+        // Nothing changed for a while: hand the last picture on again.
+        let mut saved = saved.borrow_mut();
+        if saved.at.is_some_and(|at| at.elapsed() >= Duration::from_millis(500)) {
+            saved.at = Some(Instant::now());
+            let frame = Frame { width: saved.width, height: saved.height, stride: saved.stride, data: &saved.data, timestamp: started.elapsed() };
+            if !(on_frame.borrow_mut())(frame) {
+                idle_ended.set(Some(Ended::Stopped));
+                looper.quit();
+            }
         }
     });
     timer
