@@ -1,0 +1,72 @@
+name: Desktop
+
+# CastBay Desktop (desktop/, Rust): builds the workspace on Windows, where capture and the
+# encoders run, and runs the Link protocol tests. Not a required check yet.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Reads the repository; nothing here writes to it.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Which parts the change touches, so a change to the app or website alone doesn't build the
+  # desktop sender. The job below is then skipped, which counts as passing.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.diff.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          # A pull request: its base; a push to main: main before it.
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          PATTERN: '^(desktop/|\.github/workflows/desktop\.yml)'
+        run: |
+          if git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            files="$(git diff --name-only "$BASE" HEAD)"
+          else
+            files="(unknown base: everything)"
+          fi
+          echo "$files"
+          if [ "$files" = "(unknown base: everything)" ] || echo "$files" | grep -qE "$PATTERN"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  desktop-build:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      # No submodules: the default build uses an FFmpeg process; the in-process encoder
+      # (feature ffmpeg-lib) needs the libraries tools/build-ffmpeg builds from them.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            desktop/target
+          key: desktop-${{ runner.os }}-${{ hashFiles('desktop/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --workspace --locked
+
+      - name: Test
+        run: cargo test --workspace --locked
