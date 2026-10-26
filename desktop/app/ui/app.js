@@ -161,7 +161,7 @@ listen("status", ({ payload: s }) => {
       $("s-fps").textContent = s.fps.toFixed(0);
       $("s-dropped").textContent = String(s.dropped);
       break;
-    case "ended": showSession(false); { const m = t("ended_" + s.reason); showError(m === "ended_" + s.reason ? "" : m); } break;
+    case "ended": showSession(false); { const m = t("ended_" + s.reason); showError(s.reason === "stopped" || m === "ended_" + s.reason ? "" : m); } break;
     case "failed": {
       showSession(false);
       if (s.code === "stopped") break;
