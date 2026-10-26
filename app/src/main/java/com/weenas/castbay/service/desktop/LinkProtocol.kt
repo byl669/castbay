@@ -20,6 +20,9 @@ sealed class LinkMessage {
     /** One H.264 access unit in Annex B format. */
     class Video(val presentationTimeUs: Long, val keyFrame: Boolean, val data: ByteArray) : LinkMessage()
 
+    /** One AAC-LC frame (raw, no ADTS header): 1024 samples per channel. */
+    class Audio(val presentationTimeUs: Long, val data: ByteArray) : LinkMessage()
+
     /** A type this version does not know; ignored. */
     data class Unknown(val type: Int) : LinkMessage()
 }
@@ -28,6 +31,10 @@ object LinkProtocol {
     const val VERSION = 1
     const val TYPE_CONTROL = 1
     const val TYPE_VIDEO = 2
+    const val TYPE_AUDIO = 3
+
+    /** An AAC frame is a few hundred bytes; no reason to take more from the network. */
+    const val MAX_AUDIO_BYTES = 64 * 1024
 
     /** Larger messages are protocol errors; no allocation happens before the length is checked. */
     const val MAX_MESSAGE_BYTES = 8 * 1024 * 1024
@@ -39,6 +46,7 @@ object LinkProtocol {
     const val MAX_JSON_DEPTH = 8
 
     private const val VIDEO_HEADER_BYTES = 9
+    private const val AUDIO_HEADER_BYTES = 8
     private const val FLAG_KEY_FRAME = 1
 
     /**
@@ -84,7 +92,11 @@ object LinkProtocol {
             return null
         }
         val length = input.readInt()
-        val limit = if (type == TYPE_CONTROL) MAX_CONTROL_BYTES else MAX_MESSAGE_BYTES
+        val limit = when (type) {
+            TYPE_CONTROL -> MAX_CONTROL_BYTES
+            TYPE_AUDIO -> MAX_AUDIO_BYTES
+            else -> MAX_MESSAGE_BYTES
+        }
         if (length < 0 || length > limit) throw LinkProtocolException("message of $length bytes (type $type)")
         val payload = ByteArray(length)
         input.readFully(payload)
@@ -104,6 +116,12 @@ object LinkProtocol {
                 for (i in 0 until 8) time = (time shl 8) or (payload[i].toLong() and 0xFF)
                 val flags = payload[8].toInt()
                 LinkMessage.Video(time, flags and FLAG_KEY_FRAME != 0, payload.copyOfRange(VIDEO_HEADER_BYTES, length))
+            }
+            TYPE_AUDIO -> {
+                if (length < AUDIO_HEADER_BYTES) throw LinkProtocolException("audio message too short")
+                var time = 0L
+                for (i in 0 until 8) time = (time shl 8) or (payload[i].toLong() and 0xFF)
+                LinkMessage.Audio(time, payload.copyOfRange(AUDIO_HEADER_BYTES, length))
             }
             else -> LinkMessage.Unknown(type)
         }
@@ -128,6 +146,17 @@ object LinkProtocol {
         for (i in 0 until 8) out[5 + i] = (presentationTimeUs shr (56 - 8 * i)).toByte()
         out[13] = if (keyFrame) FLAG_KEY_FRAME.toByte() else 0
         data.copyInto(out, 14)
+        return out
+    }
+
+    /** For tests and the test sender: the same framing a sender writes. */
+    fun frameAudio(presentationTimeUs: Long, data: ByteArray): ByteArray {
+        val length = AUDIO_HEADER_BYTES + data.size
+        val out = ByteArray(5 + length)
+        out[0] = TYPE_AUDIO.toByte()
+        intBytes(length).copyInto(out, 1)
+        for (i in 0 until 8) out[5 + i] = (presentationTimeUs shr (56 - 8 * i)).toByte()
+        data.copyInto(out, 13)
         return out
     }
 

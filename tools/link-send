@@ -52,13 +52,39 @@ def identity(directory):
                         "-subj", "/CN=CastBay Desktop test sender", "-sha256"], check=True, capture_output=True)
     return key, cert
 
+WRITE_LOCK = threading.Lock()  # video, audio and control come from different threads
+
 def send(sock, obj):
     payload = json.dumps(obj).encode()
-    sock.sendall(b"\x01" + struct.pack(">I", len(payload)) + payload)
+    with WRITE_LOCK:
+        sock.sendall(b"\x01" + struct.pack(">I", len(payload)) + payload)
 
 def send_video(sock, pts_us, key, data):
     body = struct.pack(">QB", pts_us, 1 if key else 0) + data
-    sock.sendall(b"\x02" + struct.pack(">I", len(body)) + body)
+    with WRITE_LOCK:
+        sock.sendall(b"\x02" + struct.pack(">I", len(body)) + body)
+
+def send_audio(sock, pts_us, data):
+    body = struct.pack(">Q", pts_us) + data
+    with WRITE_LOCK:
+        sock.sendall(b"\x03" + struct.pack(">I", len(body)) + body)
+
+def adts_frames(data):
+    """Splits an ADTS AAC stream into raw frames; returns (frames, sample_rate, channels, config_hex)."""
+    rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350]
+    frames, pos, config, rate, channels = [], 0, None, 0, 0
+    while pos + 7 <= len(data) and data[pos] == 0xFF and (data[pos + 1] & 0xF0) == 0xF0:
+        length = ((data[pos + 3] & 3) << 11) | (data[pos + 4] << 3) | (data[pos + 5] >> 5)
+        header = 7 if data[pos + 1] & 1 else 9
+        if config is None:
+            obj = ((data[pos + 2] >> 6) & 3) + 1
+            index = (data[pos + 2] >> 2) & 15
+            channels = ((data[pos + 2] & 1) << 2) | (data[pos + 3] >> 6)
+            rate = rates[index]
+            config = "%04x" % ((obj << 11) | (index << 7) | (channels << 3))
+        frames.append(data[pos + header:pos + length])
+        pos += length
+    return frames, rate, channels, config
 
 def read_exact(sock, n):
     out = b""
@@ -115,6 +141,7 @@ def main():
     p.add_argument("--size", default="1280x720")
     p.add_argument("--wait-code", type=float, default=0, help="seconds to wait before typing the code (to look at the TV)")
     p.add_argument("--no-video", action="store_true")
+    p.add_argument("--audio", action="store_true", help="also send a 440 Hz test tone (AAC-LC, 48 kHz stereo)")
     p.add_argument("--hold", action="store_true")
     a = p.parse_args()
     width, height = map(int, a.size.split("x"))
@@ -153,11 +180,20 @@ def main():
                 return 4
         else:
             break
-    send(sock, {"t": "offer", "codec": "h264", "width": width, "height": height, "fps": a.fps, "bitrate": 8000000, "source": "screen"})
+    offer = {"t": "offer", "codec": "h264", "width": width, "height": height, "fps": a.fps, "bitrate": 8000000, "source": "screen"}
+    tone = None
+    if a.audio:
+        aac = subprocess.run(
+            ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", str(a.seconds + 1),
+             "-ac", "2", "-c:a", "aac", "-b:a", "128k", "-f", "adts", "-"], capture_output=True, check=True).stdout
+        tone, rate, channels, config = adts_frames(aac)
+        offer["audio"] = {"codec": "aac", "sample_rate": rate, "channels": channels, "config": config}
+        print("audio offer:", offer["audio"], len(tone), "frames")
+    send(sock, offer)
     msg = expect(sock, "accept", "reject")
     if msg["t"] == "reject":
         print("REJECTED:", msg.get("reason")); return 3
-    print("accepted")
+    print("accepted, audio:", msg.get("audio"))
 
     stop = threading.Event()
     keyframes = []
@@ -172,6 +208,15 @@ def main():
         except Exception:
             stop.set()
     threading.Thread(target=reader, daemon=True).start()
+
+    def audio_loop(started):
+        for i, frame in enumerate(tone):
+            if stop.is_set(): return
+            time.sleep(max(0, started + i * 1024 / rate - time.time()))
+            send_audio(sock, int((time.time() - started) * 1e6), frame)
+
+    if tone and msg.get("audio"):
+        threading.Thread(target=audio_loop, args=(time.time(),), daemon=True).start()
 
     if a.hold or a.no_video:
         end = time.time() + a.seconds

@@ -76,12 +76,21 @@ After the handshake the TLS stream carries messages:
 | --- | --- | --- | --- |
 | 0x01 | `control` | both | UTF-8 JSON object |
 | 0x02 | `video` | sender to receiver | see below |
-| 0x03 | `audio` | sender to receiver | reserved (not in v1) |
+| 0x03 | `audio` | sender to receiver | see below |
 
 `video` payload: `u64` presentation time in microseconds on the sender's monotonic clock
 (only differences are meaningful), `u8` flags (bit 0: key frame, with SPS and PPS before the
 IDR slice in the same unit), then one H.264 access unit in Annex B format. The receiver
 hands it straight to the decoder and does not reorder.
+
+`audio` payload: `u64` presentation time in microseconds on the same clock as `video`, then
+one raw AAC-LC frame (1024 samples per channel, no ADTS header; at most 64 KiB). Audio is
+optional: the sender adds an `audio` object to `offer` (`codec` `aac`, `sample_rate` 44100 or
+48000, `channels` 1 or 2, `config` the AudioSpecificConfig as hex, `1190` for 48 kHz stereo) and
+sends `audio` messages only if `accept` answers `"audio": true`. The receiver plays frames as they
+arrive and drops the oldest when the sender's clock runs ahead, so audio adds no delay of its own;
+there is no lip-sync correction in v1 (the picture and the sound travel the same path and take
+about as long).
 
 Unknown message types and unknown JSON fields are ignored, which is how the protocol
 grows within a major version.
@@ -97,8 +106,8 @@ Every control message has a `t` field. v1 messages:
 | `pair` | sender | `sas` | the code the user entered |
 | `pair_result` | receiver | `ok`, `reason` | `reason`: `wrong_code`, `locked`, `expired`, `denied` |
 | `ready` | receiver | none | the sender may cast (admitted, paired if needed); the sender then sends `offer` |
-| `offer` | sender | `codec` (`h264`), `width`, `height`, `fps`, `bitrate`, `source` (`screen` or `window`) | what will be sent; sent again when the size changes |
-| `accept` | receiver | none | start sending |
+| `offer` | sender | `codec` (`h264`), `width`, `height`, `fps`, `bitrate`, `source` (`screen` or `window`), optional `audio` (see above) | what will be sent; sent again when the size changes |
+| `accept` | receiver | `audio` (bool, optional) | start sending; `audio` says the offered audio will be played |
 | `reject` | receiver | `reason` | `busy`, `blocked`, `approval_needed` (asked on the TV: connect again once allowed), `locked` (pairing paused), `wrong_password`, `unsupported` |
 | `keyframe` | receiver | none | send an IDR now |
 | `stats` | receiver | `decode_ms`, `dropped`, `fps` | once a second; the sender may lower the bitrate |
