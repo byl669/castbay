@@ -24,6 +24,13 @@ class AirPlayManager private constructor(private val context: Context) {
         private const val HEARTBEAT_CHECK_MS = 1000L
         /** Two heartbeats missed (they come every two seconds; the TCL's gaps stayed under 2.6 s). */
         private const val HEARTBEAT_TIMEOUT_MS = 5000L
+        /**
+         * Music still arriving means the phone is there: its heartbeats (TCP) can be held up for
+         * seconds while it moves between mesh Wi-Fi nodes, but its audio (UDP) goes on.
+         */
+        private const val AUDIO_ALIVE_MS = 3000L
+        /** Even with music arriving, this long without a heartbeat is the end. */
+        private const val HEARTBEAT_HARD_TIMEOUT_MS = 30_000L
         private const val DLNA_PROGRESS_MS = 500L
         /** How long a finished DLNA video's screen waits for the next one ([StreamInfo.awaitingNext]). */
         private const val NEXT_VIDEO_WAIT_MS = 30_000L
@@ -679,8 +686,10 @@ class AirPlayManager private constructor(private val context: Context) {
             val stream = currentStreamInfo
             val watched = currentState == AirPlayConnectionState.Streaming && !stream.isDlna &&
                 (stream.isAudioOnly || stream.isMirroring)
-            val silentMs = android.os.SystemClock.elapsedRealtime() - last
-            if (watched && silentMs > HEARTBEAT_TIMEOUT_MS) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            val silentMs = now - last
+            val audioAlive = stream.isAudioOnly && now - lastAudioAtMs < AUDIO_ALIVE_MS
+            if (watched && silentMs > (if (audioAlive) HEARTBEAT_HARD_TIMEOUT_MS else HEARTBEAT_TIMEOUT_MS)) {
                 Log.i(TAG, "No heartbeat from the AirPlay sender for $silentMs ms: it has gone")
                 endCasting()
                 return
