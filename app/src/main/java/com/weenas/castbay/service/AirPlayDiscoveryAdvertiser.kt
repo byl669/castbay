@@ -100,7 +100,7 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
     /** NsdManager sometimes never answers when the same names were withdrawn a moment ago: try again. */
     private val watchdog: Runnable = Runnable {
         if (!running || registeredTypes.size == 2) return@Runnable
-        if (retries >= MAX_RETRIES) {
+        if (DiscoveryRecovery.after(null, retries) == DiscoveryRecovery.Step.ANNOUNCE_BY_ITSELF) {
             Diagnostics.record("discovery", "Registering did not finish after $retries retries")
             if (!startOwnResponder("NsdManager did not answer")) noteFailure(AIRPLAY, null)
             return@Runnable
@@ -256,7 +256,7 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
                     if (!running || ownActive) return@post
                     // An internal error or an old registration still active is often gone a moment
                     // later (seen on a TV box with an old Android, code 0): try again first.
-                    if (retries < MAX_RETRIES && (errorCode == NsdManager.FAILURE_INTERNAL_ERROR || errorCode == NsdManager.FAILURE_ALREADY_ACTIVE)) {
+                    if (DiscoveryRecovery.after(errorCode, retries) == DiscoveryRecovery.Step.RETRY) {
                         mainHandler.removeCallbacks(watchdog)
                         mainHandler.postDelayed(watchdog, RETRY_DELAY_MS)
                         Diagnostics.record("discovery", "Registering $type failed (NsdManager code $errorCode), will try again")
@@ -321,7 +321,6 @@ class AirPlayDiscoveryAdvertiser(context: Context) {
         const val AIRPLAY = "_airplay._tcp"
         const val RAOP = "_raop._tcp"
         private const val REGISTER_TIMEOUT_MS = 8_000L
-        private const val MAX_RETRIES = 2
         private const val RETRY_DELAY_MS = 1_500L
     }
 }
