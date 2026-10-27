@@ -60,6 +60,50 @@ async function releaseNotes() {
     .map((version) => ({ version, date: en[version].date, en: en[version].items, zh: zh[version]?.items ?? en[version].items }));
 }
 
+/** Tries [action] up to [attempts] times, waiting longer after each failure (a busy GitHub, a shared address). */
+async function retry(action, attempts = 3) {
+  for (let i = 1; ; i++) {
+    try {
+      return await action();
+    } catch (error) {
+      if (i >= attempts) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 3000 * i));
+    }
+  }
+}
+
+/**
+ * The latest release: from GitHub's API, and if that fails (Cloudflare's builds share addresses, so the
+ * API's allowance for requests without a token is often used up, and the build then left latest.json out,
+ * which hides new versions from the app wherever GitHub cannot be reached), from the release pages on
+ * github.com, which have no such allowance: its address redirects to the latest tag, and the APK's
+ * address follows from the tag. The checksum is then not GitHub's own, only the one of the file fetched.
+ */
+async function latestRelease() {
+  try {
+    if (process.env.LATEST_APK_SKIP_API) throw new Error('API skipped (LATEST_APK_SKIP_API, for trying the fallback)');
+    return await retry(async () => {
+      const headers = { Accept: 'application/vnd.github+json' };
+      // CI passes its token, for a higher rate limit.
+      if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+      const response = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers, signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw new Error(`release: HTTP ${response.status}`);
+      return response.json();
+    });
+  } catch (apiError) {
+    const response = await retry(() =>
+      fetch(`https://github.com/${REPO}/releases/latest`, { redirect: 'manual', signal: AbortSignal.timeout(15000) })
+    );
+    const tag = /\/releases\/tag\/([^/?#]+)/.exec(response.headers.get('location') ?? '')?.[1];
+    if (!tag) throw new Error(`${apiError}; and the release page gave no tag (HTTP ${response.status})`);
+    return {
+      tag_name: decodeURIComponent(tag),
+      html_url: `https://github.com/${REPO}/releases/tag/${tag}`,
+      assets: [{ name: 'CastBay.apk', browser_download_url: `https://github.com/${REPO}/releases/download/${tag}/CastBay.apk` }],
+    };
+  }
+}
+
 export default function latestApk() {
   return {
     name: 'latest-apk',
@@ -68,20 +112,14 @@ export default function latestApk() {
         let target = GITHUB_APK;
         let latest = null;
         try {
-          const headers = { Accept: 'application/vnd.github+json' };
-          // CI passes its token, for a higher rate limit.
-          if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-          const response = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
-            headers,
-            signal: AbortSignal.timeout(15000),
-          });
-          if (!response.ok) throw new Error(`release: HTTP ${response.status}`);
-          const release = await response.json();
+          const release = await latestRelease();
           const asset = release.assets?.find((a) => a.name === 'CastBay.apk');
           if (!asset) throw new Error(`no CastBay.apk in ${release.tag_name}`);
-          const download = await fetch(asset.browser_download_url, { signal: AbortSignal.timeout(120000) });
-          if (!download.ok) throw new Error(`APK: HTTP ${download.status}`);
-          const apk = Buffer.from(await download.arrayBuffer());
+          const apk = await retry(async () => {
+            const download = await fetch(asset.browser_download_url, { signal: AbortSignal.timeout(120000) });
+            if (!download.ok) throw new Error(`APK: HTTP ${download.status}`);
+            return Buffer.from(await download.arrayBuffer());
+          });
           // The same file GitHub has, byte for byte, so the changelog's checksum holds.
           const sha256 = createHash('sha256').update(apk).digest('hex');
           if (asset.digest && asset.digest !== `sha256:${sha256}`) throw new Error('APK checksum mismatch');
