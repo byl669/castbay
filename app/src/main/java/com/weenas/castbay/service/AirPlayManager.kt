@@ -429,6 +429,14 @@ class AirPlayManager private constructor(private val context: Context) {
 
     fun start(settings: ReceiverSettings = settingsStore.load()): Boolean {
         Log.d(TAG, "Starting AirPlay server: ${settings.advertisedName}")
+        // For looking at the error screen on a healthy device (debug builds only).
+        if (com.weenas.castbay.BuildConfig.DEBUG &&
+            context.getSharedPreferences("airplay_identity", Context.MODE_PRIVATE).getBoolean("force_error", false)
+        ) {
+            activeSettings = settings
+            mainHandler.post { onNativeError("Forced error (debug build)") }
+            return true
+        }
         logMirroringCapabilities(settings)
         activeSettings = settings
         currentError = null

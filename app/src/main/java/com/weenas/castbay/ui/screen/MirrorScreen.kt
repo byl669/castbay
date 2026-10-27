@@ -333,7 +333,8 @@ fun MirrorScreen(viewModel: AirPlayViewModel) {
                 )
                 AirPlayConnectionState.Error -> ErrorScreen(
                     error = state.errorMessage ?: stringResource(R.string.unknown_error),
-                    onRetry = { viewModel.startServer() }
+                    onRetry = { viewModel.startServer() },
+                    onDiagnostics = { viewModel.navigateToDiagnostics() }
                 )
             }
         }
@@ -1323,7 +1324,7 @@ fun DisconnectedScreen(onStart: () -> Unit) {
 }
 
 @Composable
-fun ErrorScreen(error: String, onRetry: () -> Unit) {
+fun ErrorScreen(error: String, onRetry: () -> Unit, onDiagnostics: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1337,6 +1338,12 @@ fun ErrorScreen(error: String, onRetry: () -> Unit) {
         Spacer(modifier = Modifier.height(32.dp))
         Button(onClick = onRetry, modifier = Modifier.initialFocus()) {
             Text(stringResource(R.string.action_retry), fontSize = 20.sp)
+        }
+        // The diagnostics hold what went wrong and, if the person chooses, upload it with a report ID
+        // to quote in a problem report (the upload asks first, there).
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedButton(onClick = onDiagnostics) {
+            Text(stringResource(R.string.diagnostics_title), fontSize = 18.sp)
         }
     }
 }

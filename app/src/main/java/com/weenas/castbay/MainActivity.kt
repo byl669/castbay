@@ -101,9 +101,12 @@ private fun Screens() {
 
     val navigateTo by viewModel.navigateTo.collectAsState()
     val navigateBack by viewModel.navigateBack.collectAsState()
+    // Diagnostics is opened from About, or from the error screen; Back returns to where it came from.
+    var diagnosticsBack by rememberSaveable { mutableStateOf("about") }
 
     LaunchedEffect(navigateTo) {
         navigateTo?.let {
+            if (it == "diagnostics") diagnosticsBack = if (currentScreen == "mirror") "mirror" else "about"
             currentScreen = it
             viewModel.onNavigateToConsumed()
         }
@@ -127,7 +130,11 @@ private fun Screens() {
     // The remote's Back key leaves Settings, Help and About for the home screen instead of closing the app.
     BackHandler(enabled = currentScreen != "mirror") {
         // Diagnostics and the release notes are opened from About, and go back there.
-        currentScreen = if (currentScreen == "diagnostics" || currentScreen == "changelog" || currentScreen == "licenses") "about" else "mirror"
+        currentScreen = when (currentScreen) {
+            "diagnostics" -> diagnosticsBack
+            "changelog", "licenses" -> "about"
+            else -> "mirror"
+        }
     }
 
     Box {
