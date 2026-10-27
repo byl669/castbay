@@ -1,0 +1,2 @@
+• Fixed the receiver staying on "Starting..." after quit and reopen on some devices (retries, then starts itself).
+• The error screen has a Diagnostics button.
