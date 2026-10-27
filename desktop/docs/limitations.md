@@ -47,8 +47,8 @@ update it when something changes.
 - **No AMD or Intel hardware encoder** (VAAPI is not built in); the CPU encodes with x264.
 - **Tray**: GNOME needs the AppIndicator extension to show it; without one the window of a running
   cast is brought back by starting CastBay Desktop again from the applications menu.
-- **A stale "remember" token** makes the portal wait without showing a dialog; deleting
-  `~/.local/share/castbay-desktop/screencast-token` fixes it (see the user guide).
+- **A stale "remember" token** makes the portal wait without showing a dialog; after 15 s the token
+  is dropped and the system asks again. Not tested with other portal backends than GNOME's.
 - **A static screen** gets no pictures from the desktop; the capture hands on the last one twice a
   second so the stream stays alive.
 - **No package signing or repository**: the `.deb` is a plain download, not an apt source.

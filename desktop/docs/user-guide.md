@@ -60,10 +60,11 @@ Wayland, PipeWire for the sound and the desktop portal (`xdg-desktop-portal`). I
   **Start casting** the system asks which screen or window to share. Tick **remember this choice**
   and it does not ask again. 窗口里没有屏幕/窗口列表，点“开始投屏”时由系统询问要共享哪个屏幕或窗口，
   勾选“记住此选择”后不再询问。
-- **If it stays on "starting" and no dialog shows / 一直停在“启动中”而没有弹窗:** the remembered choice
-  may have gone stale. Delete `~/.local/share/castbay-desktop/screencast-token` and cast again; the
-  dialog comes back. 记住的选择可能失效了：删除 `~/.local/share/castbay-desktop/screencast-token` 后重新投屏，
-  弹窗会再出现。
+- **If the remembered choice goes stale / 记住的选择失效时:** the system may stop answering for it. After 15 seconds
+  CastBay Desktop forgets it and the system's dialog comes back; choose again. (The choice is kept in
+  `~/.local/share/castbay-desktop/screencast-token`; deleting that file does the same.)
+  系统可能不再响应记住的选择：15 秒后 CastBay Desktop 会忘掉它，系统弹窗重新出现，再选一次即可。
+  （选择保存在 `~/.local/share/castbay-desktop/screencast-token`，删除该文件效果相同。）
 - **Tray / 托盘:** closing the window during a cast keeps the cast running in the tray. GNOME shows no tray icons by default
   (install the "AppIndicator" extension to see one); without it, open **CastBay Desktop** from the applications menu again and
   the running window comes back. 投屏中关闭窗口，投屏会继续在托盘里运行。GNOME 默认不显示托盘图标（安装 AppIndicator 扩展即可）；
