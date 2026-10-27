@@ -42,10 +42,34 @@ struct Share {
     close: Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>>,
 }
 
+/// How long a remembered choice may take: a valid one is answered at once, a stale one is waited on
+/// silently by the portal (no dialog shows), so a person would be left looking at "starting".
+const REMEMBERED_CHOICE_WAIT: Duration = Duration::from_secs(15);
+
+/// What [open_portal_with] returns when the remembered choice did not answer in time.
+const STALE: &str = "the remembered screen-share choice did not answer";
+
 async fn open_portal(target: &Target) -> Result<Share, Error> {
+    match open_portal_with(target, true).await {
+        Err(Error::Platform(message)) if message == STALE => {
+            // The remembered choice is no longer good: forget it and let the system ask again.
+            if let Some(file) = token_file() {
+                let _ = std::fs::remove_file(file);
+            }
+            open_portal_with(target, false).await
+        }
+        other => other,
+    }
+}
+
+async fn open_portal_with(target: &Target, use_token: bool) -> Result<Share, Error> {
     let proxy = Screencast::new().await.map_err(platform)?;
     let session = proxy.create_session(Default::default()).await.map_err(platform)?;
-    let token = token_file().and_then(|f| std::fs::read_to_string(f).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let token = token_file()
+        .filter(|_| use_token)
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
     let source = match target {
         Target::Monitor(_) => SourceType::Monitor,
         Target::Window(_) => SourceType::Window,
@@ -62,9 +86,19 @@ async fn open_portal(target: &Target) -> Result<Share, Error> {
         )
         .await
         .map_err(platform)?;
-    let response = proxy
-        .start(&session, None, Default::default())
-        .await
+    let started = proxy.start(&session, None, Default::default());
+    let request = if token.is_some() {
+        match tokio::time::timeout(REMEMBERED_CHOICE_WAIT, started).await {
+            Ok(result) => result,
+            Err(_) => {
+                let _ = session.close().await;
+                return Err(Error::Platform(STALE.into()));
+            }
+        }
+    } else {
+        started.await
+    };
+    let response = request
         .map_err(platform)?
         .response()
         .map_err(|e| Error::NotFound(format!("nothing was shared ({e})")))?;
