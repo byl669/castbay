@@ -1,0 +1,1 @@
+• Desktop casting is found even when the system service will not register the receiver.
