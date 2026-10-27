@@ -1,0 +1,2 @@
+• Fixed the receiver taking seconds to come up after quitting and reopening on some devices: now about 1 to 3 s.
+• New "Receive Test Versions" switch (off by default): test versions can be installed from About.

@@ -28,6 +28,8 @@ Nothing, unless you choose to. CastBay does not collect personal information, an
 
 Once a day, CastBay asks this website (castbay.weenas.com/latest.json, or through [the relay](#the-relay-castweenascom) if the website can't be reached), else GitHub (api.github.com), for the number of the latest CastBay version, so it can tell you when a newer one is out. The request contains nothing about you or your TV; the server sees your network's address, as for any web page (the website is hosted by Cloudflare; GitHub's own policy applies to GitHub). You can turn this off in Settings, under General.
 
+If you turn on **Receive Test Versions** in Settings, under General (off by default), CastBay also asks GitHub (api.github.com) for the list of CastBay's releases, test versions included, so it can offer a test version in About. That request, too, contains nothing about you or your TV; GitHub sees your network's address and GitHub's own policy applies.
+
 Only when you choose **Download and install** on the About screen does CastBay download the new version, from this website or GitHub, check that it is exactly the released file (its SHA-256), and open Android's installer, where you confirm the update. Nothing is downloaded or installed on its own.
 
 ## Problem reports (only when you send one)
