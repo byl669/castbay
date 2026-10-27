@@ -41,6 +41,8 @@ data class ReceiverSettings(
     val language: String = LANGUAGE_SYSTEM,
     /** Look for a newer CastBay on GitHub once a day (UpdateChecker). */
     val checkUpdates: Boolean = true,
+    /** Also offer test versions (GitHub pre-releases) when updating, to help check a fix; off for everybody else. */
+    val testVersions: Boolean = false,
     /** After CastBay stops unexpectedly, send a problem report at the next start (off: ask). */
     val sendErrorReports: Boolean = false,
     /**
@@ -83,7 +85,7 @@ data class ReceiverSettings(
         withoutLiveSettings() != previous.withoutLiveSettings()
 
     private fun withoutLiveSettings() = copy(
-        showStats = false, pictureMode = PICTURE_FIT, showLyrics = false, language = LANGUAGE_SYSTEM, checkUpdates = true,
+        showStats = false, pictureMode = PICTURE_FIT, showLyrics = false, language = LANGUAGE_SYSTEM, checkUpdates = true, testVersions = false,
         sendErrorReports = false, screenSaver = SCREEN_SAVER_BURN_IN
     )
 
@@ -165,6 +167,7 @@ class ReceiverSettingsStore(context: Context) {
         language = preferences.getString("language", null)
             ?.takeIf { it in ReceiverSettings.LANGUAGES } ?: ReceiverSettings.LANGUAGE_SYSTEM,
         checkUpdates = preferences.getBoolean("check_updates", true),
+        testVersions = preferences.getBoolean("test_versions", false),
         sendErrorReports = preferences.getBoolean("send_error_reports", false),
         screenSaver = preferences.getString("screen_saver", null)
             ?.takeIf { it in ReceiverSettings.SCREEN_SAVERS } ?: ReceiverSettings.SCREEN_SAVER_BURN_IN
@@ -197,6 +200,7 @@ class ReceiverSettingsStore(context: Context) {
             .putBoolean("show_lyrics", settings.showLyrics)
             .putString("language", settings.language)
             .putBoolean("check_updates", settings.checkUpdates)
+            .putBoolean("test_versions", settings.testVersions)
             .putBoolean("send_error_reports", settings.sendErrorReports)
             .putString("screen_saver", settings.screenSaver)
             .remove("audio_latency")

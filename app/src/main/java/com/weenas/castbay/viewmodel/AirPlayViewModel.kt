@@ -160,7 +160,7 @@ class AirPlayViewModel(application: Application) : AndroidViewModel(application)
 
     private val lyricsClient = com.weenas.castbay.service.LyricsClient(appVersion)
 
-    private val updateChecker = com.weenas.castbay.service.UpdateChecker(application, appVersion)
+    private val updateChecker = com.weenas.castbay.service.UpdateChecker(application, appVersion) { _settings.value.testVersions }
     /** Whether CastBay looks for updates itself: not in store builds (F-Droid), which the store updates. */
     private val checksUpdates get() = BuildConfig.SELF_UPDATE && _settings.value.checkUpdates
     private val _update = MutableStateFlow(if (checksUpdates) updateChecker.known() else null)
@@ -324,6 +324,16 @@ class AirPlayViewModel(application: Application) : AndroidViewModel(application)
     fun setCheckUpdates(enabled: Boolean) {
         updateSettings { it.copy(checkUpdates = enabled) }
         checkForUpdate()
+    }
+
+    /** Test versions on or off for the update check; looks again at once, the list changes with it. */
+    fun setTestVersions(enabled: Boolean) {
+        updateSettings { it.copy(testVersions = enabled) }
+        if (!checksUpdates) return
+        kotlin.concurrent.thread(name = "CastBay-update") {
+            val found = updateChecker.check(force = true)
+            if (checksUpdates) _update.value = found
+        }
     }
 
     /** Every setting back to its default (the TV's own name is kept: it isn't a setting). */

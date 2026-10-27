@@ -97,4 +97,44 @@ class UpdateCheckerTest {
         assertTrue(UpdateChecker.isNewer("1.2.0", "1.1.0-dev+6228385"))
         assertFalse(UpdateChecker.isNewer("1.1.0", "1.1.0-dev+6228385"))
     }
+
+    @Test
+    fun aTestVersionComesBeforeItsReleaseAndAfterTheLastOne() {
+        assertTrue(UpdateChecker.isNewer("1.8.7-beta.1", "1.8.6"))
+        assertTrue(UpdateChecker.isNewer("1.8.7", "1.8.7-beta.1"))
+        assertFalse(UpdateChecker.isNewer("1.8.7-beta.1", "1.8.7"))
+        assertTrue(UpdateChecker.isNewer("1.8.7-beta.2", "1.8.7-beta.1"))
+        assertTrue(UpdateChecker.isNewer("1.8.7-beta.10", "1.8.7-beta.9"))
+        assertTrue(UpdateChecker.isNewer("1.8.7-rc.1", "1.8.7-beta.3"))
+        assertFalse(UpdateChecker.isNewer("1.8.7-beta.1", "1.8.7-beta.1"))
+        // The same test version again is not an update; a longer one after a shorter is.
+        assertTrue(UpdateChecker.isNewer("1.8.7-beta.1.1", "1.8.7-beta.1"))
+    }
+
+    @Test
+    fun aDevBuildStillCountsAsItsRelease() {
+        assertFalse(UpdateChecker.isNewer("1.8.7", "1.8.7-dev+abc1234"))
+        assertFalse(UpdateChecker.isNewer("1.8.6", "1.8.7-dev+abc1234"))
+        assertTrue(UpdateChecker.isNewer("1.8.8", "1.8.7-dev+abc1234"))
+        assertFalse(UpdateChecker.isTestVersion("1.8.7-dev+abc1234"))
+        assertTrue(UpdateChecker.isTestVersion("1.8.7-beta.1"))
+        assertFalse(UpdateChecker.isTestVersion("1.8.7"))
+    }
+
+    @Test
+    fun withTestVersionsOnTheNewestTestVersionIsOffered() {
+        val json = """[
+            {"tag_name": "v1.8.7-beta.2", "prerelease": true, "html_url": "beta2", "assets": [
+                {"name": "CastBay-1.8.7-beta.2.apk", "browser_download_url": "b2", "digest": "sha256:${"cd".repeat(32)}"}
+            ]},
+            {"tag_name": "v1.8.7-beta.1", "prerelease": true, "html_url": "beta1"},
+            {"tag_name": "v1.8.6", "html_url": "release"}
+        ]"""
+        assertEquals("1.8.6", UpdateChecker.newest(json)!!.version)
+        val test = UpdateChecker.newest(json, includeTests = true)!!
+        assertEquals(AppUpdate("1.8.7-beta.2", "beta2", listOf("b2"), "cd".repeat(32)), test)
+        // Once the release is out it wins over its test versions.
+        val later = """[{"tag_name": "v1.8.7", "html_url": "release"}, {"tag_name": "v1.8.7-beta.2", "prerelease": true, "html_url": "beta2"}]"""
+        assertEquals("1.8.7", UpdateChecker.newest(later, includeTests = true)!!.version)
+    }
 }

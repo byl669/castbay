@@ -68,13 +68,15 @@ data class AppUpdate(
  * any web page). The result is kept, so the home screen can show it at once and without
  * asking again. Blocking; call off the main thread.
  */
-class UpdateChecker(context: Context, private val appVersion: String) {
+class UpdateChecker(context: Context, private val appVersion: String, private val testVersions: () -> Boolean = { false }) {
     private val appContext = context.applicationContext
     private val preferences = context.applicationContext.getSharedPreferences("updates", Context.MODE_PRIVATE)
 
     /** The last release found, if newer than this app (no request made). */
     fun known(): AppUpdate? {
         val update = preferences.getString(KEY_UPDATE, null)?.let(AppUpdate::fromJson) ?: return null
+        // A test version that was found while test versions were on is not offered once they are off.
+        if (isTestVersion(update.version) && !testVersions()) return null
         return update.takeIf { isNewer(it.version, appVersion) }
     }
 
@@ -101,17 +103,28 @@ class UpdateChecker(context: Context, private val appVersion: String) {
             ?: runCatching { fromGitHub() }
                 .onFailure { Log.w(TAG, "GitHub update check failed: ${it.message}") }
                 .getOrNull()
-        if (latest != null) {
-            preferences.edit().putString(KEY_UPDATE, latest.toJson()).putLong(KEY_CHECKED_AT, nowMs).apply()
-            Log.i(TAG, "Latest release ${latest.version} (this is $appVersion)")
+        // With test versions on, GitHub's list (pre-releases included) may hold something newer still.
+        val test = if (testVersions()) {
+            runCatching { newest(get(releasesUrl()), includeTests = true) }
+                .onFailure { Log.w(TAG, "GitHub test version check failed: ${it.message}") }
+                .getOrNull()
+        } else null
+        val best = if (test != null && isNewer(test.version, latest?.version ?: appVersion)) test else latest
+        if (best != null) {
+            preferences.edit().putString(KEY_UPDATE, best.toJson()).putLong(KEY_CHECKED_AT, nowMs).apply()
+            Log.i(TAG, "Latest release ${best.version} (this is $appVersion)")
         }
-        return latest
+        return best
     }
 
     // The website, or its relay (util/Servers.kt).
     private fun fromWebsite(): AppUpdate? = AppUpdate.fromJson(Servers.call(appContext, "/latest.json") { get(it.toString()) })
 
-    private fun fromGitHub(): AppUpdate? = newest(get(RELEASES_URL))
+    private fun fromGitHub(): AppUpdate? = newest(get(releasesUrl()))
+
+    /** GitHub's release list; a debug build can point it at a test server (preference debug_releases_url in "updates"). */
+    private fun releasesUrl(): String =
+        (if (com.weenas.castbay.BuildConfig.DEBUG) preferences.getString("debug_releases_url", null) else null) ?: RELEASES_URL
 
     private fun get(url: String): String {
         val connection = URL(url).openConnection() as HttpURLConnection
@@ -141,12 +154,13 @@ class UpdateChecker(context: Context, private val appVersion: String) {
          * with its CastBay-<version>.apk and that file's SHA-256 when GitHub lists them, and the
          * listed releases' notes (for when the website, which has them too, can't be reached).
          */
-        internal fun newest(releasesJson: String): AppUpdate? {
+        internal fun newest(releasesJson: String, includeTests: Boolean = false): AppUpdate? {
             val releases = JSONArray(releasesJson)
-            // Not drafts, and not test builds: a pre-release, or a tag with a suffix (v1.8.7-beta.1), is
-            // for testers who install it by hand; parse() would otherwise count it as 1.8.7.
+            // Not drafts, and test versions (a pre-release, or a tag with a suffix, v1.8.7-beta.1) only for
+            // a person who turned test versions on.
             val published = (0 until releases.length()).map { releases.getJSONObject(it) }
-                .filter { !it.optBoolean("draft") && !it.optBoolean("prerelease") && '-' !in it.optString("tag_name") }
+                .filter { !it.optBoolean("draft") }
+                .filter { includeTests || (!it.optBoolean("prerelease") && '-' !in it.optString("tag_name")) }
             val notes = published.mapNotNull(::gitHubNotes).sortedWith { a, b -> compare(b.version, a.version) }
             return published
                 .mapNotNull { release ->
@@ -209,6 +223,13 @@ class UpdateChecker(context: Context, private val appVersion: String) {
             version.substringBefore('-').substringBefore('+')
                 .split('.').map { it.toIntOrNull() ?: return null }.takeIf { it.isNotEmpty() }
 
+        /** "1.8.7-beta.1" is a test version; a "-dev+commit" build of this app counts as its release. */
+        private fun preRelease(version: String): String? =
+            version.substringBefore('+').substringAfter('-', "").takeIf { it.isNotEmpty() && !it.startsWith("dev") }
+
+        fun isTestVersion(version: String) = preRelease(version) != null
+
+        /** The 1.8.7-beta.1 < 1.8.7 order of semantic versioning: numbers first, then a test version before its release. */
         private fun compare(a: String, b: String): Int {
             val x = parse(a).orEmpty()
             val y = parse(b).orEmpty()
@@ -216,7 +237,31 @@ class UpdateChecker(context: Context, private val appVersion: String) {
                 val d = x.getOrElse(i) { 0 }.compareTo(y.getOrElse(i) { 0 })
                 if (d != 0) return d
             }
-            return 0
+            val pa = preRelease(a)
+            val pb = preRelease(b)
+            return when {
+                pa == null && pb == null -> 0
+                pa == null -> 1
+                pb == null -> -1
+                else -> comparePre(pa, pb)
+            }
+        }
+
+        private fun comparePre(a: String, b: String): Int {
+            val x = a.split('.')
+            val y = b.split('.')
+            for (i in 0 until minOf(x.size, y.size)) {
+                val nx = x[i].toIntOrNull()
+                val ny = y[i].toIntOrNull()
+                val d = when {
+                    nx != null && ny != null -> nx.compareTo(ny)
+                    nx != null -> -1
+                    ny != null -> 1
+                    else -> x[i].compareTo(y[i])
+                }
+                if (d != 0) return d
+            }
+            return x.size.compareTo(y.size)
         }
     }
 }

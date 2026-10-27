@@ -83,6 +83,8 @@
     <string name="setting_language">Language</string>
     <string name="language_system">System</string>
     <string name="setting_check_updates">Check for Updates</string>
+    <string name="setting_test_versions">Test Versions</string>
+    <string name="setting_test_versions_note">Also offers test versions of CastBay (marked beta) when one is published, to help check a fix. They may be less stable; the next release replaces them. Asks GitHub; nothing about this TV is sent.</string>
     <string name="setting_check_updates_note">Once a day, asks castbay.weenas.com (or GitHub) for the latest version number; nothing about this TV is sent.</string>
     <string name="setting_error_reports">Send Error Reports</string>
     <string name="setting_error_reports_note">If CastBay stops unexpectedly, send a problem report (the error and the app\'s recent log, with titles, names and links taken out) when it next starts. Off: you are asked each time.</string>

@@ -85,6 +85,8 @@
     <string name="setting_language">语言</string>
     <string name="language_system">跟随系统</string>
     <string name="setting_check_updates">检查更新</string>
+    <string name="setting_test_versions">接收测试版本</string>
+    <string name="setting_test_versions_note">有测试版本（标注 beta）发布时也会提示更新，用来帮忙验证修复。测试版可能不够稳定，下一个正式版会替换它。会向 GitHub 查询，不会发送这台电视的任何信息。</string>
     <string name="setting_check_updates_note">每天向 castbay.weenas.com（或 GitHub）查询一次最新版本号，不会发送这台电视的任何信息。</string>
     <string name="setting_error_reports">自动发送错误报告</string>
     <string name="setting_error_reports_note">映湾意外退出后，下次启动时自动发送问题报告（错误信息和应用最近的日志，歌名、设备名称和网址会先去掉）。关闭时，每次都会先询问你。</string>
