@@ -13,6 +13,7 @@ import com.weenas.castbay.service.UpdateInstaller
 import com.weenas.castbay.BuildConfig
 import com.weenas.castbay.util.AppVersion
 import com.weenas.castbay.util.CrashReports
+import com.weenas.castbay.util.Diagnostics
 import com.weenas.castbay.util.Log
 import com.weenas.castbay.util.UsageStats
 import com.weenas.castbay.service.ReceiverSettings
@@ -80,6 +81,30 @@ class AirPlayViewModel(application: Application) : AndroidViewModel(application)
         _state.value = AirPlayUiState(state, streamInfo, error)
     }
 
+    private val startHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    /** The person stopped the receiver (Back twice, a Stop button): it is not started again behind their back. */
+    private var stoppedByPerson = false
+    private var startChecks = 0
+
+    /**
+     * The receiver must come up when the app opens. On an Allwinner board (#239) the request to start the
+     * service never reached it after the app was quit and opened again in the same process, and the screen
+     * said "Starting…" for ever: after 5 s still idle, ask again, twice, and then start the receiver here
+     * without the service (AirPlay works while the app is open).
+     */
+    private val startCheck: Runnable = Runnable {
+        if (stoppedByPerson || _state.value.connectionState != com.weenas.castbay.service.AirPlayConnectionState.Idle) return@Runnable
+        startChecks++
+        if (startChecks <= START_CHECK_SERVICE_TRIES) {
+            Diagnostics.record("app", "The receiver is still off after ${START_CHECK_MS / 1000} s: asking the service again ($startChecks)")
+            askServiceToStart()
+        } else {
+            Diagnostics.record("app", "The receiver is still off: starting it without the service")
+            manager.start()
+        }
+        if (startChecks < START_CHECK_MAX) startHandler.postDelayed(startCheck, START_CHECK_MS)
+    }
+
     init {
         manager.registerStateCallback(stateCallback)
         // Opening the app starts the receiver (a no-op if it is running), like turning on an Apple TV.
@@ -87,12 +112,37 @@ class AirPlayViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun startServer() {
-        val intent = Intent(getApplication(), com.weenas.castbay.service.AirPlayService::class.java)
-            .setAction(com.weenas.castbay.service.AirPlayService.ACTION_START)
-        ContextCompat.startForegroundService(getApplication(), intent)
+        stoppedByPerson = false
+        startChecks = 0
+        askServiceToStart()
+        startHandler.removeCallbacks(startCheck)
+        startHandler.postDelayed(startCheck, START_CHECK_MS)
+    }
+
+    private fun askServiceToStart() {
+        val app = getApplication<Application>()
+        if (com.weenas.castbay.BuildConfig.DEBUG &&
+            app.getSharedPreferences("airplay_identity", android.content.Context.MODE_PRIVATE).getBoolean("drop_service_start", false)
+        ) {
+            // For trying the recovery below on a healthy device (debug builds only).
+            Diagnostics.record("app", "Asking the service to start the receiver: dropped for testing")
+            return
+        }
+        Diagnostics.record("app", "Asking the service to start the receiver")
+        try {
+            ContextCompat.startForegroundService(
+                app,
+                Intent(app, com.weenas.castbay.service.AirPlayService::class.java)
+                    .setAction(com.weenas.castbay.service.AirPlayService.ACTION_START)
+            )
+        } catch (error: Exception) {
+            Diagnostics.record("app", "The service could not be asked: ${error.javaClass.simpleName}: ${error.message}")
+        }
     }
 
     fun stopServer() {
+        stoppedByPerson = true
+        startHandler.removeCallbacks(startCheck)
         getApplication<Application>().startService(
             Intent(getApplication(), com.weenas.castbay.service.AirPlayService::class.java)
                 .setAction(com.weenas.castbay.service.AirPlayService.ACTION_STOP)
@@ -333,7 +383,14 @@ class AirPlayViewModel(application: Application) : AndroidViewModel(application)
 
     override fun onCleared() {
         super.onCleared()
+        startHandler.removeCallbacks(startCheck)
         networkMonitor.stop()
         manager.unregisterStateCallback(stateCallback)
+    }
+
+    private companion object {
+        const val START_CHECK_MS = 5_000L
+        const val START_CHECK_SERVICE_TRIES = 2
+        const val START_CHECK_MAX = 3
     }
 }

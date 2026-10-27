@@ -429,6 +429,11 @@ class AirPlayManager private constructor(private val context: Context) {
 
     fun start(settings: ReceiverSettings = settingsStore.load()): Boolean {
         Log.d(TAG, "Starting AirPlay server: ${settings.advertisedName}")
+        // Already up (the app started it without the service, or the service asks a second time).
+        if (currentState != AirPlayConnectionState.Idle && currentState != AirPlayConnectionState.Error) {
+            Log.d(TAG, "The receiver is already running")
+            return true
+        }
         // For looking at the error screen on a healthy device (debug builds only).
         if (com.weenas.castbay.BuildConfig.DEBUG &&
             context.getSharedPreferences("airplay_identity", Context.MODE_PRIVATE).getBoolean("force_error", false)
