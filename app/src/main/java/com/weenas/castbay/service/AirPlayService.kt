@@ -29,6 +29,12 @@ class AirPlayService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
         )
 
+        /**
+         * When the app last asked this service to stop (SystemClock.elapsedRealtime; 0 before). A start request
+         * made soon after is lost on some boards (#239): see [com.weenas.castbay.viewmodel.AirPlayViewModel.startServer].
+         */
+        @Volatile var lastStopRequestedAt = 0L
+
         /** Whether the receiver is up, for [com.weenas.castbay.receiver.ReceiverStarter]. */
         @Volatile var isReceiving = false
             private set

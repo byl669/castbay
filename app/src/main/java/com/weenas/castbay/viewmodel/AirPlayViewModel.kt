@@ -105,6 +105,11 @@ class AirPlayViewModel(application: Application) : AndroidViewModel(application)
         if (startChecks < START_CHECK_MAX) startHandler.postDelayed(startCheck, START_CHECK_MS)
     }
 
+    /** After a quick reopen: the service is asked once the spell in which its start requests are lost is over. */
+    private val askServiceLater: Runnable = Runnable {
+        if (!stoppedByPerson && !com.weenas.castbay.service.AirPlayService.isReceiving) askServiceToStart()
+    }
+
     init {
         manager.registerStateCallback(stateCallback)
         // Opening the app starts the receiver (a no-op if it is running), like turning on an Apple TV.
@@ -114,8 +119,20 @@ class AirPlayViewModel(application: Application) : AndroidViewModel(application)
     fun startServer() {
         stoppedByPerson = false
         startChecks = 0
-        askServiceToStart()
         startHandler.removeCallbacks(startCheck)
+        startHandler.removeCallbacks(askServiceLater)
+        val sinceStop = android.os.SystemClock.elapsedRealtime() - com.weenas.castbay.service.AirPlayService.lastStopRequestedAt
+        if (com.weenas.castbay.service.AirPlayService.lastStopRequestedAt != 0L && sinceStop < QUICK_REOPEN_MS) {
+            // Opened again soon after quitting: on the Allwinner board of #239 the system lost every start
+            // request for the service in the first seconds (up to 15 s) after it stopped. Not asking it yet:
+            // the receiver starts here at once, and the service, which only holds it in the foreground, is
+            // asked once that spell is over.
+            Diagnostics.record("app", "Opened ${sinceStop} ms after quitting: starting the receiver here, the service follows")
+            manager.start()
+            startHandler.postDelayed(askServiceLater, QUICK_REOPEN_MS - sinceStop + 1_000)
+        } else {
+            askServiceToStart()
+        }
         startHandler.postDelayed(startCheck, START_CHECK_MS)
     }
 
@@ -143,6 +160,8 @@ class AirPlayViewModel(application: Application) : AndroidViewModel(application)
     fun stopServer() {
         stoppedByPerson = true
         startHandler.removeCallbacks(startCheck)
+        startHandler.removeCallbacks(askServiceLater)
+        com.weenas.castbay.service.AirPlayService.lastStopRequestedAt = android.os.SystemClock.elapsedRealtime()
         getApplication<Application>().startService(
             Intent(getApplication(), com.weenas.castbay.service.AirPlayService::class.java)
                 .setAction(com.weenas.castbay.service.AirPlayService.ACTION_STOP)
@@ -394,11 +413,14 @@ class AirPlayViewModel(application: Application) : AndroidViewModel(application)
     override fun onCleared() {
         super.onCleared()
         startHandler.removeCallbacks(startCheck)
+        startHandler.removeCallbacks(askServiceLater)
         networkMonitor.stop()
         manager.unregisterStateCallback(stateCallback)
     }
 
     private companion object {
+        /** Opened again within this long of quitting counts as soon (the start requests were lost for up to 15 s). */
+        const val QUICK_REOPEN_MS = 20_000L
         const val START_CHECK_MS = 5_000L
         const val START_CHECK_SERVICE_TRIES = 2
         const val START_CHECK_MAX = 3
