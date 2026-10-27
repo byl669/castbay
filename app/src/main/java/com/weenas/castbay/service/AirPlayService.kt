@@ -74,7 +74,9 @@ class AirPlayService : Service() {
         if (intent?.action == ACTION_STOP) {
             if (running) manager.stop()
             running = false
-            stopSelf()
+            // With the id: a start request that came in after this stop is not thrown away with it
+            // (stopSelf() without one stops the service whatever is queued, #239).
+            stopSelf(startId)
             return START_NOT_STICKY
         }
         if (running) return START_NOT_STICKY
