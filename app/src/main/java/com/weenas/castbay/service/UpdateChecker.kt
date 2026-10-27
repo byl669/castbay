@@ -143,8 +143,10 @@ class UpdateChecker(context: Context, private val appVersion: String) {
          */
         internal fun newest(releasesJson: String): AppUpdate? {
             val releases = JSONArray(releasesJson)
+            // Not drafts, and not test builds: a pre-release, or a tag with a suffix (v1.8.7-beta.1), is
+            // for testers who install it by hand; parse() would otherwise count it as 1.8.7.
             val published = (0 until releases.length()).map { releases.getJSONObject(it) }
-                .filter { !it.optBoolean("draft") }
+                .filter { !it.optBoolean("draft") && !it.optBoolean("prerelease") && '-' !in it.optString("tag_name") }
             val notes = published.mapNotNull(::gitHubNotes).sortedWith { a, b -> compare(b.version, a.version) }
             return published
                 .mapNotNull { release ->

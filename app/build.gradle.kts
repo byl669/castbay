@@ -100,6 +100,9 @@ android {
             versionNameSuffix = "-dev+" + gitCommit.get()
         }
         release {
+            // A test build for testers (tag v1.8.7-beta.1): the release workflow passes -PreleaseSuffix=-beta.1,
+            // so the app and its reports say 1.8.7-beta.1 and can't be taken for the release.
+            (findProperty("releaseSuffix") as String?)?.takeIf { it.matches(Regex("-[0-9A-Za-z.]+")) }?.let { versionNameSuffix = it }
             // R8 drops the unused parts of Compose, Media3 and Kotlin (about 2/3 of the dex).
             isMinifyEnabled = true
             isShrinkResources = true

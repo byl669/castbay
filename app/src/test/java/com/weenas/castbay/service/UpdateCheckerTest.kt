@@ -21,8 +21,8 @@ class UpdateCheckerTest {
     fun picksTheHighestPublishedRelease() {
         val json = """[
             {"tag_name": "v1.0.80", "draft": true, "html_url": "d"},
-            {"tag_name": "v1.0.57", "prerelease": true, "html_url": "a"},
-            {"tag_name": "v1.0.72", "prerelease": true, "html_url": "b", "assets": [
+            {"tag_name": "v1.0.57", "html_url": "a"},
+            {"tag_name": "v1.0.72", "html_url": "b", "assets": [
                 {"name": "CastBay.apk", "browser_download_url": "x"},
                 {"name": "CastBay-1.0.72.apk", "browser_download_url": "apk", "digest": "sha256:${"ab".repeat(32)}"}
             ]},
@@ -30,6 +30,21 @@ class UpdateCheckerTest {
         ]"""
         assertEquals(AppUpdate("1.0.72", "b", listOf("apk"), "ab".repeat(32)), UpdateChecker.newest(json))
         assertNull(UpdateChecker.newest("[]"))
+    }
+
+    @Test
+    fun aTestBuildIsNeverOfferedAsAnUpdate() {
+        // A pre-release for testers (also one whose tag has a suffix but no flag) counts as nothing, even
+        // though its version, 1.8.7, is higher than the release the person has.
+        val json = """[
+            {"tag_name": "v1.8.7-beta.1", "prerelease": true, "html_url": "beta", "assets": [
+                {"name": "CastBay-1.8.7-beta.1.apk", "browser_download_url": "betaapk"}
+            ]},
+            {"tag_name": "v1.8.8-rc.1", "html_url": "rc"},
+            {"tag_name": "v1.8.6", "html_url": "release"}
+        ]"""
+        assertEquals("1.8.6", UpdateChecker.newest(json)!!.version)
+        assertNull(UpdateChecker.newest("""[{"tag_name": "v1.8.7-beta.1", "prerelease": true, "html_url": "beta"}]"""))
     }
 
     @Test
