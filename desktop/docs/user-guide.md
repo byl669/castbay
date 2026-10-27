@@ -44,6 +44,33 @@ Two ways, same program. / 两种方式，程序是同一个。
 3. 在列表里选接收端，选择屏幕或窗口，点“开始投屏”。
 4. 第一次连接时接收端会显示 6 位配对码，在窗口里输入即可，以后不用再输。
 
+## Linux / Linux 版
+
+Ubuntu or Debian, 64-bit, with GNOME (or another desktop with a working screen-sharing portal) on
+Wayland, PipeWire for the sound and the desktop portal (`xdg-desktop-portal`). Install the
+`.deb` from the release page: `sudo apt install ./castbay-desktop_<version>_amd64.deb`, then start
+**CastBay Desktop** from the applications menu. It was tested on Ubuntu 26.04 with GNOME.
+
+适用于 64 位 Ubuntu / Debian，桌面为 GNOME（或其他屏幕共享门户可用的桌面），使用 Wayland，声音走 PipeWire，
+并带有桌面门户（`xdg-desktop-portal`）。从发布页下载 `.deb`，执行
+`sudo apt install ./castbay-desktop_<版本>_amd64.deb`，然后在应用程序菜单里打开 **CastBay Desktop**。
+已在装有 GNOME 的 Ubuntu 26.04 上测试。
+
+- **What to share / 投什么:** there is no screen or window list in the window. When you press
+  **Start casting** the system asks which screen or window to share. Tick **remember this choice**
+  and it does not ask again. 窗口里没有屏幕/窗口列表，点“开始投屏”时由系统询问要共享哪个屏幕或窗口，
+  勾选“记住此选择”后不再询问。
+- **If it stays on "starting" and no dialog shows / 一直停在“启动中”而没有弹窗:** the remembered choice
+  may have gone stale. Delete `~/.local/share/castbay-desktop/screencast-token` and cast again; the
+  dialog comes back. 记住的选择可能失效了：删除 `~/.local/share/castbay-desktop/screencast-token` 后重新投屏，
+  弹窗会再出现。
+- **Tray / 托盘:** closing the window during a cast keeps the cast running in the tray. GNOME shows no tray icons by default
+  (install the "AppIndicator" extension to see one); without it, open **CastBay Desktop** from the applications menu again and
+  the running window comes back. 投屏中关闭窗口，投屏会继续在托盘里运行。GNOME 默认不显示托盘图标（安装 AppIndicator 扩展即可）；
+  没有扩展时，再次从应用程序菜单打开 **CastBay Desktop**，正在运行的窗口会回到前台。
+- **Start with the session / 开机自启:** the setting writes `~/.config/autostart/castbay-desktop.desktop`. 设置里的开关会写入这个文件。
+- **Encoders / 编码:** NVIDIA GPUs use NVENC, everything else x264 on the CPU (AMD and Intel hardware encoders are not built in yet). NVIDIA 显卡用 NVENC，其他用 CPU 的 x264（AMD、Intel 硬件编码暂未支持）。
+
 ## The window / 窗口
 
 **Home / 主页:** pick a receiver, choose a screen or a window, press **Start casting**. The line above the button shows the quality and sound in use; **Change** opens the settings.

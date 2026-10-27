@@ -38,6 +38,21 @@ update it when something changes.
   the Chinese wizard was walked through on a real PC, but the SmartScreen warning of a browser
   download of an unsigned file was never seen (files were copied over the network).
 
+## Linux
+
+- **Tested on one setup only**: Ubuntu 26.04, GNOME on Wayland, an NVIDIA GPU (NVENC and x264), the
+  receiver on a Sony TV. Other distributions, KDE, Sway and X11 sessions were not tried.
+- **No screen or window list**: Wayland gives applications no list of windows, so the system's own
+  dialog chooses what to share (the choice can be remembered).
+- **No AMD or Intel hardware encoder** (VAAPI is not built in); the CPU encodes with x264.
+- **Tray**: GNOME needs the AppIndicator extension to show it; without one the window of a running
+  cast is brought back by starting CastBay Desktop again from the applications menu.
+- **A stale "remember" token** makes the portal wait without showing a dialog; deleting
+  `~/.local/share/castbay-desktop/screencast-token` fixes it (see the user guide).
+- **A static screen** gets no pictures from the desktop; the capture hands on the last one twice a
+  second so the stream stays alive.
+- **No package signing or repository**: the `.deb` is a plain download, not an apt source.
+
 ## Done differently from what one might expect
 
 - **MSI, not NSIS.** Windows Defender quarantined the NSIS uninstaller of the unsigned build
