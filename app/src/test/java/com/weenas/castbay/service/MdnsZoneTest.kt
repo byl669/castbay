@@ -143,4 +143,69 @@ class MdnsZoneTest {
         out.write(byteArrayOf((0xC0 or (nameAt shr 8)).toByte(), nameAt.toByte(), 0, 12, 0, 1))
         assertNotNull(zone.answer(out.toByteArray()))
     }
+
+    // ---- hostile input: whatever arrives on the multicast port goes through answer()
+
+    private fun valid(name: String = "_airplay._tcp.local", type: Int = MdnsZone.TYPE_PTR) = query(name, type)
+
+    @Test
+    fun `random bytes never make the zone throw`() {
+        val random = java.util.Random(20261027)
+        repeat(20_000) {
+            val packet = ByteArray(random.nextInt(300)).also { random.nextBytes(it) }
+            zone.answer(packet)
+        }
+    }
+
+    @Test
+    fun `every truncation and every single-byte corruption of a good query is survived`() {
+        val good = valid()
+        for (cut in good.indices) zone.answer(good.copyOf(cut))
+        for (i in good.indices) for (b in intArrayOf(0x00, 0x3F, 0x40, 0x7F, 0x80, 0xBF, 0xC0, 0xFF)) {
+            val bad = good.copyOf()
+            bad[i] = b.toByte()
+            zone.answer(bad)
+        }
+    }
+
+    @Test
+    fun `a name that points back at itself is refused, not followed for ever`() {
+        // The pointer at offset 12 points at offset 12.
+        val loop = byteArrayOf(0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0xC0.toByte(), 12, 0, 12, 0, 1)
+        assertNull(zone.answer(loop))
+        // Two pointers pointing at each other.
+        val pair = byteArrayOf(0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0xC0.toByte(), 14, 0xC0.toByte(), 12, 0, 12, 0, 1)
+        assertNull(zone.answer(pair))
+    }
+
+    @Test
+    fun `a question count larger than the packet and absurd counts are refused`() {
+        val many = byteArrayOf(0, 0, 0, 0, 0xFF.toByte(), 0xFF.toByte(), 0, 0, 0, 0, 0, 0) + ByteArray(40)
+        assertNull(zone.answer(many))
+        val claimed = byteArrayOf(0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0) + valid().copyOfRange(12, valid().size)
+        assertNull(zone.answer(claimed))
+    }
+
+    @Test
+    fun `a label longer than the packet or than 63 bytes is refused`() {
+        val longLabel = byteArrayOf(0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 62) + ByteArray(10)
+        assertNull(zone.answer(longLabel))
+        val tooLong = byteArrayOf(0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 70) + ByteArray(80)
+        assertNull(zone.answer(tooLong))
+    }
+
+    @Test
+    fun `the answer to the biggest query is a bounded packet`() {
+        // 32 questions for the same name: the answer still holds each record once.
+        val out = ByteArrayOutputStream()
+        out.write(byteArrayOf(0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0))
+        repeat(32) {
+            for (label in "_airplay._tcp.local".split('.')) { out.write(label.length); out.write(label.toByteArray()) }
+            out.write(0)
+            out.write(byteArrayOf(0, 12, 0, 1))
+        }
+        val response = zone.answer(out.toByteArray())!!
+        assertTrue(response.size < 1500)
+        assertEquals(1, records(response).count { it.type == MdnsZone.TYPE_PTR })
+    }
 }
