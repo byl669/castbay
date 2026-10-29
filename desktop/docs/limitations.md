@@ -60,10 +60,12 @@ update it when something changes.
 - **Two installers, not one.** The language of an MSI's setup screens is fixed when it is built.
   One `setup.exe` that picks the language and also installs WebView2 is for after code signing.
 - **Updates are started by you.** The window tells you a newer release exists; the Update button
-  downloads the installer, checks it against the SHA-256 GitHub lists for the file, and on Windows
-  installs it over this version and opens the program again (on Linux the system's installer opens).
-  It does nothing while a cast runs, and the portable zip gets the release page instead. Nothing
-  updates in the background. Not tried yet against a real release (the first one that can is the
-  one after 0.1.2); it needs to reach github.com.
+  downloads the installer (from the website, which holds the newest release's installers, else
+  from GitHub), checks it against its SHA-256, and on Windows installs it over this version and
+  opens the program again (on Linux the system's installer opens). It does nothing while a cast
+  runs, and the portable zip gets the release page instead. Nothing updates in the background.
+  Tried on a Windows PC that cannot reach github.com's downloads (0.1.2 to 0.1.3, through the
+  website) and the download and check on Linux; the Linux installer step (the system's own
+  installer opening the .deb) was not tried.
 - **Unsigned.** SmartScreen warns until the signature (SignPath Foundation, free for open source)
   is in place and the files build a reputation.
