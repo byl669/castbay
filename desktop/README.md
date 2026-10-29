@@ -11,8 +11,8 @@ approved; a `.deb` for Ubuntu/Debian).
 H.264 encoding with AMD, NVIDIA or x264, sound over AAC, CastBay Link, reconnect, bitrate that
 follows the connection), `castbay-cast` is its command line, and `app/` is the CastBay Desktop
 window (Tauri 2 over the engine, a plain HTML page, no Node needed): pick a receiver, a screen or
-window and a quality, type the pairing code once, and cast; tray, start with Windows and update
-notice included. The receiver side is in the Android app (`service/desktop/`).
+window and a quality, type the pairing code once, and cast; tray, start with Windows and in-app
+update included. The receiver side is in the Android app (`service/desktop/`).
 
 The Linux version (docs/plan-linux.md) shares the engine, the encoders (x264, NVENC, AAC) and the
 Link code; it captures through the desktop portal and PipeWire (Wayland), plays no part in the
