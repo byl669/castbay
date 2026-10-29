@@ -171,7 +171,8 @@ pub fn system_line() -> String {
 
 /// Sends `text` and returns the report's ID: to the website, and if it cannot be reached, to its
 /// relay. A refusal by the website is final (the relay would pass the same on).
-pub fn upload(text: &str, version: &str, dir: &Path) -> Result<String, Refusal> {
+/// `kind` is `manual`, `crash` or `failure` (what the website files it under).
+pub fn upload(text: &str, version: &str, kind: &str, dir: &Path) -> Result<String, Refusal> {
     std::fs::create_dir_all(dir).map_err(|e| Refusal::Network(e.to_string()))?;
     let file = dir.join("report.txt");
     std::fs::write(&file, text).map_err(|e| Refusal::Network(e.to_string()))?;
@@ -182,7 +183,7 @@ pub fn upload(text: &str, version: &str, dir: &Path) -> Result<String, Refusal> 
             .args(["--silent", "--show-error", "--proto", "=https", "--connect-timeout", "15", "--max-time", "90", "--request", "POST"])
             .args(["--header", "Content-Type: text/plain; charset=utf-8"])
             .args(["--header", &format!("X-CastBay-Version: {version}")])
-            .args(["--header", "X-CastBay-Report: manual", "--header", "X-CastBay-App: desktop"])
+            .args(["--header", &format!("X-CastBay-Report: {kind}"), "--header", "X-CastBay-App: desktop"])
             .arg("--data-binary")
             .arg(format!("@{}", file.display()))
             .args(["--write-out", "\n%{http_code}"])

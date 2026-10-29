@@ -11,6 +11,7 @@ use std::time::Duration;
 use castbay_sender::{Codec, Options, Status, Stopper, Target};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+mod crash;
 mod diagnostics;
 mod settings;
 mod update;
@@ -64,6 +65,9 @@ fn tray_words(zh: bool) -> [&'static str; 3] {
 
 /// The person's choices, loaded at start and rewritten when they change.
 struct SettingsState(Mutex<Settings>);
+
+/// What the previous run left behind (crash.rs), until the person has decided about it.
+struct PendingCrash(Mutex<Option<crash::Pending>>);
 
 #[derive(Default)]
 struct Casting {
@@ -196,6 +200,9 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>, settin
         let _ = emitter.emit("status", status_json(&status));
     });
     log(&app, &format!("start: {}:{} {} {} {} {}", args.ip, args.port, args.kind, format!("{}fps {}Mbit/s", settings.fps, settings.bitrate_mbps), settings.encoder, if args.kind == "window" { "" } else { args.value.as_str() }));
+    if let Ok(dir) = app.path().app_data_dir() {
+        crash::mark_casting(&dir, true);
+    }
     let handle = castbay_sender::start(options, on_status, ask);
     *state.stopper.lock().unwrap() = Some(handle.stopper());
 
@@ -203,11 +210,15 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>, settin
     let app = app.clone();
     std::thread::spawn(move || {
         let outcome = handle.join();
+        if let Ok(dir) = app.path().app_data_dir() {
+            crash::mark_casting(&dir, false);
+        }
         let state = app.state::<Casting>();
         *state.stopper.lock().unwrap() = None;
         *state.code.lock().unwrap() = None;
         if let Err(failure) = outcome {
             log(&app, &format!("failed: {} ({})", failure.code, failure.detail));
+            report_failure(&app, &failure.code, &failure.detail);
             let _ = app.emit("status", json!({"kind": "failed", "code": failure.code, "reason": failure.detail}));
         }
     });
@@ -368,32 +379,83 @@ async fn diagnostics_view(app: AppHandle) -> Result<serde_json::Value, String> {
     Ok(json!({"info": info, "log": log}))
 }
 
-/// Uploads a problem report (only ever called from the button on the Diagnostics page, after it
-/// said what is sent): the report's ID, or why it failed.
-#[tauri::command]
-async fn upload_report(app: AppHandle) -> Result<String, String> {
-    let info = device_info(&app).await;
+/// Builds and uploads a report: the report's ID, or why it failed. `extra` goes first (what
+/// happened: the crash, the failed cast).
+async fn send_report(app: &AppHandle, kind: &'static str, extra: Option<String>) -> Result<String, String> {
+    let info = device_info(app).await;
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let mut head = format!("CastBay Desktop problem report, {}\n", utc(secs));
     for (label, value) in &info {
         head.push_str(&format!("{label}: {value}\n"));
     }
+    if let Some(extra) = extra {
+        head.push_str(&format!("\n== {} ==\n{}\n", if kind == "crash" { "The crash" } else { "What happened" }, extra.trim_end()));
+    }
     let lines = diagnostics::read_log(&app.path().app_log_dir().map_err(|e| e.to_string())?);
     let text = diagnostics::report_text(&head, &lines, &home_dir());
     let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("report");
-    let result = tauri::async_runtime::spawn_blocking(move || diagnostics::upload(&text, env!("CARGO_PKG_VERSION"), &dir))
+    let result = tauri::async_runtime::spawn_blocking(move || diagnostics::upload(&text, env!("CARGO_PKG_VERSION"), kind, &dir))
         .await
         .map_err(|e| e.to_string())?;
     match result {
         Ok(id) => {
-            log(&app, &format!("problem report uploaded: {id}"));
+            log(app, &format!("problem report ({kind}) uploaded: {id}"));
             Ok(id)
         }
         Err(refusal) => {
-            log(&app, &format!("problem report not uploaded: {}", refusal.text()));
+            log(app, &format!("problem report ({kind}) not uploaded: {}", refusal.text()));
             Err(refusal.text())
         }
     }
+}
+
+/// Uploads a problem report (only ever called from the button on the Diagnostics page, after it
+/// said what is sent): the report's ID, or why it failed.
+#[tauri::command]
+async fn upload_report(app: AppHandle) -> Result<String, String> {
+    send_report(&app, "manual", None).await
+}
+
+/// What the previous run left behind, if the person has not decided about it yet: `panic` or `unfinished`.
+#[tauri::command]
+fn crash_pending(state: State<'_, PendingCrash>) -> Option<&'static str> {
+    state.0.lock().unwrap().as_ref().map(|p| p.kind)
+}
+
+/// The person chose to send the report about the previous run's end (or `dismiss`: not to).
+#[tauri::command]
+async fn send_crash_report(app: AppHandle) -> Result<String, String> {
+    let pending = app.state::<PendingCrash>().0.lock().unwrap().clone();
+    let Some(pending) = pending else { return Err("nothing to report".into()) };
+    let id = send_report(&app, "crash", Some(pending.text)).await?;
+    *app.state::<PendingCrash>().0.lock().unwrap() = None;
+    Ok(id)
+}
+
+#[tauri::command]
+fn dismiss_crash(state: State<'_, PendingCrash>) {
+    *state.0.lock().unwrap() = None;
+}
+
+/// A failed cast is reported by itself, if the person turned that on and the failure is one that
+/// says something about this program or computer (not a wrong password or a busy receiver), at
+/// most once an hour.
+fn report_failure(app: &AppHandle, code: &str, detail: &str) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    if !app.state::<SettingsState>().0.lock().unwrap().error_reports || !matches!(code, "encoder" | "capture" | "no_picture" | "protocol" | "other") {
+        return;
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let last = LAST.load(Ordering::Relaxed);
+    if last != 0 && now.saturating_sub(last) < 3600 {
+        return;
+    }
+    LAST.store(now, Ordering::Relaxed);
+    let (app, text) = (app.clone(), format!("A cast failed: {code} ({detail})"));
+    tauri::async_runtime::spawn(async move {
+        let _ = send_report(&app, "failure", Some(text)).await;
+    });
 }
 
 /// Downloads and installs a newer version (see `update`). `Ok("installing")`: Windows is replacing
@@ -631,9 +693,23 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .manage(Casting::default())
         .setup(|app| {
-            let loaded = Settings::load(&app.path().app_data_dir().unwrap_or_default());
+            let data_dir = app.path().app_data_dir().unwrap_or_default();
+            let left = crash::take(&data_dir);
+            crash::install_hook(data_dir.clone());
+            let loaded = Settings::load(&data_dir);
+            let send_by_itself = loaded.error_reports && left.is_some();
+            app.manage(PendingCrash(Mutex::new(left.clone())));
             let zh = loaded.chinese(chinese());
             app.manage(SettingsState(Mutex::new(loaded)));
+            // The person turned error reports on: the previous run's end is sent now, without asking.
+            if let (true, Some(left)) = (send_by_itself, left) {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if send_report(&handle, "crash", Some(left.text)).await.is_ok() {
+                        *handle.state::<PendingCrash>().0.lock().unwrap() = None;
+                    }
+                });
+            }
             let [open_text, stop_text, quit_text] = tray_words(zh);
             let open = MenuItem::with_id(app, "open", open_text, true, None::<&str>)?;
             let stop = MenuItem::with_id(app, "stop", stop_text, true, None::<&str>)?;
@@ -675,7 +751,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, set_settings, list_paired, discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, install_update, encoders, diagnostics_view, upload_report, autostart_get, autostart_set])
+        .invoke_handler(tauri::generate_handler![get_settings, set_settings, list_paired, discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, install_update, encoders, diagnostics_view, upload_report, crash_pending, send_crash_report, dismiss_crash, autostart_get, autostart_set])
         .run(tauri::generate_context!())
         .expect("the CastBay Desktop window failed to start");
 }

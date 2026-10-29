@@ -14,6 +14,9 @@ pub struct Settings {
     /// Pictures per second: 30 or 60.
     pub fps: u32,
     pub send_audio: bool,
+    /// Send a problem report by itself when the program ended badly or a cast failed (off until the
+    /// person turns it on; otherwise they are asked after a crash).
+    pub error_reports: bool,
     /// `auto`, `amf`, `nvenc` or `x264`.
     pub encoder: String,
     /// `auto` (follow the system), `zh` or `en`.
@@ -36,6 +39,7 @@ impl Default for Settings {
             bitrate_mbps: 8,
             fps: 30,
             send_audio: true,
+            error_reports: false,
             encoder: "auto".into(),
             language: "auto".into(),
             last_receiver: String::new(),
@@ -106,6 +110,7 @@ impl Settings {
                 "language" => next.language = choice(value, &LANGUAGES, key)?,
                 "source_kind" => next.source_kind = choice(value, &KINDS, key)?,
                 "send_audio" => next.send_audio = boolean(value, key)?,
+                "error_reports" => next.error_reports = boolean(value, key)?,
                 "welcome_done" => next.welcome_done = boolean(value, key)?,
                 "migrated" => next.migrated = boolean(value, key)?,
                 "last_receiver" => next.last_receiver = text(value, key)?,
@@ -182,7 +187,7 @@ mod tests {
     fn a_new_install_gets_the_defaults() {
         let s = Settings::load(&temp("none"));
         assert_eq!(s, Settings::default());
-        assert_eq!((s.send_audio, s.encoder.as_str()), (true, "auto"));
+        assert_eq!((s.send_audio, s.encoder.as_str(), s.error_reports), (true, "auto", false));
         assert_eq!(s.quality_params(), (30, 8_000_000));
     }
 
