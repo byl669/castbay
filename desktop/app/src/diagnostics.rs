@@ -9,9 +9,9 @@ use std::process::Command;
 
 /// The website takes up to 512 KB.
 const MAX_CHARS: usize = 400_000;
-const SITE: &str = "https://castbay.weenas.com/api/reports";
+const SITE: &str = "https://castbay.weenas.com";
 /// For networks that cannot reach Cloudflare (see update.rs): the same request, passed on unchanged.
-const RELAY: &str = "https://cast.weenas.com/api/reports";
+const RELAY: &str = "https://cast.weenas.com";
 
 /// What went wrong with an upload, for the page.
 #[derive(Debug, PartialEq)]
@@ -169,6 +169,11 @@ pub fn system_line() -> String {
     }
 }
 
+/// The address of `path` ("/api/stats") on `base` ("https://castbay.weenas.com").
+fn address(base: &str, path: &str) -> String {
+    format!("{base}{path}")
+}
+
 /// POSTs `text` to `path` of the website, and if it cannot be reached, of its relay: the status
 /// and the answer. Whatever answer comes (an error status too) is final; only a failure to reach
 /// an address tries the next one. `headers` are whole lines (`Name: value`).
@@ -185,7 +190,7 @@ pub fn post(path: &str, content_type: &str, headers: &[String], text: &str, dir:
         for header in headers {
             command.args(["--header", header]);
         }
-        command.arg("--data-binary").arg(format!("@{}", file.display())).args(["--write-out", "\n%{http_code}"]).arg(format!("{base}{path}"));
+        command.arg("--data-binary").arg(format!("@{}", file.display())).args(["--write-out", "\n%{http_code}"]).arg(address(base, path));
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -300,6 +305,13 @@ mod tests {
         assert!(text.len() <= MAX_CHARS, "{}", text.len());
         assert!(text.contains("<ip>") && text.contains("<name>") && !text.contains("10.1.1."));
         assert!(text.starts_with("CastBay Desktop 0.1.4"));
+    }
+
+    #[test]
+    fn requests_go_to_the_right_addresses() {
+        assert_eq!(address(SITE, "/api/reports"), "https://castbay.weenas.com/api/reports");
+        assert_eq!(address(RELAY, "/api/stats"), "https://cast.weenas.com/api/stats");
+        assert_eq!(address(SITE, "/api/stats/delete"), "https://castbay.weenas.com/api/stats/delete");
     }
 
     #[test]
