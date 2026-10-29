@@ -84,7 +84,7 @@ Wayland, PipeWire for the sound and the desktop portal (`xdg-desktop-portal`). I
 
 | | |
 | --- | --- |
-| Quality / 画质 | Light 30 fps 4 Mbit/s; Balanced 30 fps 8 Mbit/s; Smooth 60 fps 10 Mbit/s. The chosen quality is the most that is used: when the connection cannot keep up the bitrate goes down by a third (to a sixth of it at most) and creeps back up after twenty calm seconds. 画质选项是上限：网络跟不上时码率降三成（最低降到上限的六分之一），平静二十秒后慢慢回升 |
+| Quality / 画质 | Low bitrate 30 fps 4 Mbit/s; Balanced 30 fps 8 Mbit/s; High FPS 60 fps 10 Mbit/s. The chosen quality is the most that is used: when the connection cannot keep up the bitrate goes down by a third (to a sixth of it at most) and creeps back up after twenty calm seconds. 画质选项是上限：网络跟不上时码率降三成（最低降到上限的六分之一），平静二十秒后慢慢回升 |
 | Send sound too / 同时传声音 | The sound the PC plays is sent too (and still plays on the PC). 电脑播放的声音一起传过去 |
 | Encoder / 编码器 | Automatic tries AMD, then NVIDIA, then the CPU (x264). 自动：依次尝试 AMD、NVIDIA、CPU |
 | Start with Windows / 开机自动启动 | Starts with Windows and waits in the tray. 随 Windows 启动并在系统托盘待命 |
