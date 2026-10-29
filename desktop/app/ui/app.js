@@ -366,8 +366,12 @@ async function checkUpdate() {
   try {
     const current = await window.__TAURI__.app.getVersion();
     if (current === "0.0.0") return "dev";
-    const response = await fetch("https://api.github.com/repos/weenas/castbay/releases?per_page=30");
-    if (!response.ok) return null;
+    // GitHub, and for networks that cannot reach it the relay (which passes on the same answer).
+    let response = null;
+    for (const url of ["https://api.github.com/repos/weenas/castbay/releases?per_page=30", "https://cast.weenas.com/desktop/releases.json"]) {
+      try { response = await fetch(url, { signal: AbortSignal.timeout(10000) }); if (response.ok) break; } catch { response = null; }
+    }
+    if (!response || !response.ok) return null;
     const releases = (await response.json()).filter((r) => !r.draft && r.tag_name.startsWith("desktop-v"));
     const best = releases.map((r) => ({ version: r.tag_name.slice("desktop-v".length), url: r.html_url })).sort((p, q) => (newer(p.version, q.version) ? -1 : 1))[0];
     return best && newer(best.version, current) ? best : "latest";

@@ -12,6 +12,10 @@ use sha2::{Digest, Sha256};
 
 const RELEASES: &str = "https://api.github.com/repos/weenas/castbay/releases/tags/desktop-v";
 const DOWNLOADS: &str = "https://github.com/weenas/castbay/releases/download/desktop-v";
+/// For networks that cannot reach GitHub (as for the Android app's updates, see util/Servers.kt):
+/// the relay passes on the release's description and its files, and nothing else. The file is
+/// checked against the SHA-256 in the description either way.
+const RELAY: &str = "https://cast.weenas.com/desktop/";
 /// Far more than any installer of this program; stops a wrong file from filling the disk.
 const MAX_BYTES: u64 = 300_000_000;
 
@@ -67,9 +71,19 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// Where the release's description can be had: GitHub, then the relay.
+fn release_urls(version: &str) -> [String; 2] {
+    [format!("{RELEASES}{version}"), format!("{RELAY}{version}/release.json")]
+}
+
+/// Where a release file can be had: GitHub, then the relay.
+fn file_urls(version: &str, name: &str) -> [String; 2] {
+    [format!("{DOWNLOADS}{version}/{name}"), format!("{RELAY}{version}/{name}")]
+}
+
 fn curl() -> Command {
     let mut c = Command::new("curl");
-    c.args(["--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "15", "--max-time", "900"]);
+    c.args(["--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "10", "--max-time", "900"]);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -92,20 +106,39 @@ pub fn fetch(version: &str, windows: bool, zh: bool, dir: &Path) -> Result<PathB
     let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
     let name = asset_name(version, windows, zh, arch);
 
-    let out = curl().args(["--header", "Accept: application/vnd.github+json", &format!("{RELEASES}{version}")]).output().map_err(|e| format!("curl: {e}"))?;
-    if !out.status.success() {
-        return Err(describe(&out));
+    let mut failure = String::new();
+    let mut release = None;
+    for url in release_urls(version) {
+        let out = curl().args(["--header", "Accept: application/vnd.github+json", &url]).output().map_err(|e| format!("curl: {e}"))?;
+        if out.status.success() {
+            if let Ok(json) = serde_json::from_slice::<Value>(&out.stdout) {
+                release = Some(json);
+                break;
+            }
+            failure = "the release description is not JSON".into();
+        } else {
+            failure = describe(&out);
+        }
     }
-    let release: Value = serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())?;
-    let (url, digest) = find_asset(&release, &name, version)?;
+    let release = release.ok_or(failure)?;
+    let (_, digest) = find_asset(&release, &name, version)?;
 
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let file = dir.join(&name);
-    let out = curl().args(["--max-filesize", &MAX_BYTES.to_string(), "--output"]).arg(&file).arg(&url).output().map_err(|e| format!("curl: {e}"))?;
-    if !out.status.success() {
+    let mut failure = String::new();
+    let mut got = false;
+    for url in file_urls(version, &name) {
+        let out = curl().args(["--max-filesize", &MAX_BYTES.to_string(), "--output"]).arg(&file).arg(&url).output().map_err(|e| format!("curl: {e}"))?;
+        if out.status.success() {
+            got = true;
+            break;
+        }
         let _ = std::fs::remove_file(&file);
-        return Err(describe(&out));
+        failure = describe(&out);
+    }
+    if !got {
+        return Err(failure);
     }
     if sha256_file(&file)? != digest {
         let _ = std::fs::remove_file(&file);
@@ -186,6 +219,16 @@ mod tests {
         for url in ["https://evil.example/castbay-desktop_0.1.3_amd64.deb", "http://github.com/weenas/castbay/releases/download/desktop-v0.1.3/castbay-desktop_0.1.3_amd64.deb", "https://github.com/weenas/castbay/releases/download/desktop-v0.1.4/castbay-desktop_0.1.3_amd64.deb"] {
             assert!(find_asset(&release(url, digest.clone()), "castbay-desktop_0.1.3_amd64.deb", "0.1.3").is_err(), "{url}");
         }
+    }
+
+    #[test]
+    fn both_sources_name_the_same_release_and_file() {
+        let [github, relay] = file_urls("0.1.3", "a.deb");
+        assert_eq!(github, "https://github.com/weenas/castbay/releases/download/desktop-v0.1.3/a.deb");
+        assert_eq!(relay, "https://cast.weenas.com/desktop/0.1.3/a.deb");
+        let [api, relay] = release_urls("0.1.3");
+        assert_eq!(api, "https://api.github.com/repos/weenas/castbay/releases/tags/desktop-v0.1.3");
+        assert_eq!(relay, "https://cast.weenas.com/desktop/0.1.3/release.json");
     }
 
     #[test]
