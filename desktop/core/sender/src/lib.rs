@@ -87,6 +87,8 @@ pub struct Report {
     /// The bitrate at the end, and how many times it was changed on the way.
     pub final_bitrate_bps: u32,
     pub bitrate_changes: u32,
+    /// The encoder that was used: `amf`, `nvenc`, `x264` (empty if none opened).
+    pub encoder: String,
     pub ended: String,
 }
 

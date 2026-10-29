@@ -15,6 +15,7 @@ mod crash;
 mod diagnostics;
 mod settings;
 mod update;
+mod usage;
 
 use settings::Settings;
 use tauri::menu::{Menu, MenuItem};
@@ -192,10 +193,26 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>, settin
     *state.code.lock().unwrap() = Some(code_tx);
     let ask = Box::new(move |_expected: &str| code_rx.recv_timeout(Duration::from_secs(180)).ok().flatten());
     let emitter = app.clone();
+    let minimize = settings.minimize_on_cast;
     let on_status = Arc::new(move |status: Status| {
         match &status {
             Status::Receiver { .. } => {}
             other => log(&emitter, &format!("{other:?}")),
+        }
+        // The cast is running: the window gets out of the way (the tray icon and the taskbar still
+        // reach it). If the cast then ends other than by the person's own stop, it comes back, so
+        // the reason is seen.
+        match &status {
+            Status::Casting { .. } if minimize => {
+                if let Some(window) = emitter.get_webview_window("main") {
+                    if window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false) {
+                        let _ = window.minimize();
+                        MINIMIZED_FOR_CAST.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+            }
+            Status::Ended(reason) if reason != "stopped" => bring_back(&emitter),
+            _ => {}
         }
         let _ = emitter.emit("status", status_json(&status));
     });
@@ -203,6 +220,10 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>, settin
     if let Ok(dir) = app.path().app_data_dir() {
         crash::mark_casting(&dir, true);
     }
+    count_usage(&app, if args.kind == "window" { "cast.window" } else { "cast.screen" });
+    count_usage(&app, if settings.fps == 60 { "fps.60" } else { "fps.30" });
+    count_usage(&app, usage::bitrate_key(settings.bitrate_mbps));
+    count_usage(&app, if settings.send_audio { "sound.on" } else { "sound.off" });
     let handle = castbay_sender::start(options, on_status, ask);
     *state.stopper.lock().unwrap() = Some(handle.stopper());
 
@@ -213,12 +234,23 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>, settin
         if let Ok(dir) = app.path().app_data_dir() {
             crash::mark_casting(&dir, false);
         }
+        match &outcome {
+            Ok(report) => {
+                count_usage(&app, usage::length_key(report.seconds));
+                match report.encoder.as_str() {
+                    name @ ("amf" | "nvenc" | "x264") => count_usage(&app, &format!("encoder.{name}")),
+                    _ => {}
+                }
+            }
+            Err(failure) => count_usage(&app, usage::failure_key(&failure.code)),
+        }
         let state = app.state::<Casting>();
         *state.stopper.lock().unwrap() = None;
         *state.code.lock().unwrap() = None;
         if let Err(failure) = outcome {
             log(&app, &format!("failed: {} ({})", failure.code, failure.detail));
             report_failure(&app, &failure.code, &failure.detail);
+            bring_back(&app);
             let _ = app.emit("status", json!({"kind": "failed", "code": failure.code, "reason": failure.detail}));
         }
     });
@@ -247,6 +279,7 @@ fn reset_settings(app: AppHandle, settings: State<'_, SettingsState>) -> Result<
     let mut next = current.clone();
     next.restore_defaults();
     next.save(&app.path().app_data_dir().map_err(|e| e.to_string())?)?;
+    usage_changed(&app, current.usage_stats, next.usage_stats);
     *current = next.clone();
     log(&app, "settings restored to the defaults");
     Ok(next)
@@ -258,6 +291,7 @@ fn set_settings(patch: serde_json::Value, app: AppHandle, settings: State<'_, Se
     let mut next = current.clone();
     next.apply(&patch)?;
     next.save(&app.path().app_data_dir().map_err(|e| e.to_string())?)?;
+    usage_changed(&app, current.usage_stats, next.usage_stats);
     if next.language != current.language {
         if let Some(items) = app.try_state::<TrayItems>() {
             let [open, stop, quit] = tray_words(next.chinese(chinese()));
@@ -356,6 +390,96 @@ async fn found_encoders() -> Vec<&'static str> {
     FOUND.get_or_init(|| found).clone()
 }
 
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Counts one thing for today in the usage statistics (nothing happens while they are off).
+fn count_usage(app: &AppHandle, key: &str) {
+    if let Ok(dir) = app.path().app_data_dir() {
+        usage::count(&dir, &usage::day_of(now_secs()), key);
+    }
+}
+
+/// The settings now and before: turning the statistics on makes an ID, off forgets the counts and
+/// asks the website to delete what it holds under the ID.
+fn usage_changed(app: &AppHandle, was: bool, now: bool) {
+    let Ok(dir) = app.path().app_data_dir() else { return };
+    if now && !was {
+        usage::turn_on(&dir);
+    } else if was && !now {
+        if let Some(id) = usage::turn_off(&dir) {
+            let (app, cache) = (app.clone(), app.path().app_cache_dir().unwrap_or_default().join("usage"));
+            std::thread::spawn(move || {
+                let body = json!({ "id": id }).to_string();
+                match diagnostics::post("/api/stats/delete", "application/json", &[], &body, &cache) {
+                    Ok((code, _)) if (200..300).contains(&code) => log(&app, "usage statistics deleted on the website"),
+                    other => log(&app, &format!("deleting usage statistics failed: {other:?}")),
+                }
+            });
+        }
+    }
+}
+
+/// Sends each finished day's summary (not today's, still counting), at most a week's; a day is kept
+/// until the website has it. Blocking.
+fn send_usage(app: &AppHandle) {
+    let Ok(dir) = app.path().app_data_dir() else { return };
+    if !app.state::<SettingsState>().0.lock().unwrap().usage_stats {
+        return;
+    }
+    let Some((id, days)) = usage::finished_days(&dir, &usage::day_of(now_secs())) else { return };
+    if days.is_empty() {
+        return;
+    }
+    let (settings, chinese) = {
+        let s = app.state::<SettingsState>().0.lock().unwrap().clone();
+        let zh = s.chinese(chinese());
+        (s, zh)
+    };
+    let encoders = tauri::async_runtime::block_on(found_encoders());
+    let height = castbay_capture::monitors().ok().and_then(|m| m.iter().filter_map(|name| usage::monitor_height(name)).max());
+    let session = if cfg!(windows) { "windows".to_string() } else { std::env::var("XDG_SESSION_TYPE").unwrap_or_default() };
+    let (os, os_version) = if cfg!(windows) {
+        ("windows", diagnostics::windows_version(&diagnostics::system_line()).unwrap_or_else(|| "unknown".into()))
+    } else {
+        ("linux", diagnostics::linux_distribution(&std::fs::read_to_string("/etc/os-release").unwrap_or_default()))
+    };
+    let cache = app.path().app_cache_dir().unwrap_or_default().join("usage");
+    for (day, counts) in days {
+        let body = json!({
+            "platform": "desktop", "id": id, "day": day, "app": env!("CARGO_PKG_VERSION"),
+            "os": os, "osVersion": os_version, "arch": std::env::consts::ARCH,
+            "session": match session.as_str() { "windows" => "windows", "wayland" => "wayland", "x11" => "x11", _ => "other" },
+            "screen": height.map(usage::screen_class).unwrap_or("unknown"),
+            "lang": if chinese { "zh" } else { "en" },
+            "encoders": encoders.iter().filter(|e| matches!(**e, "amf" | "nvenc" | "x264")).collect::<Vec<_>>(),
+            "counts": counts,
+            "settings": { "encoder": settings.encoder, "language": settings.language, "updates": settings.check_updates, "errorReports": settings.error_reports },
+        });
+        match diagnostics::post("/api/stats", "application/json", &[], &body.to_string(), &cache) {
+            Ok((code, _)) if (200..300).contains(&code) => {
+                usage::forget(&dir, &day);
+                log(app, &format!("usage statistics for {day} sent"));
+            }
+            other => {
+                log(app, &format!("usage statistics for {day} not sent: {other:?}"));
+                break;
+            }
+        }
+    }
+}
+
+/// The window was minimised by the program when a cast started (not by the person).
+static MINIMIZED_FOR_CAST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A cast that went wrong ends: the window the program had minimised is shown again.
+fn bring_back(app: &AppHandle) {
+    if MINIMIZED_FOR_CAST.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        show_main(app);
+    }
+}
+
 /// The person's home folder, to be taken out of what is sent (diagnostics::scrub).
 fn home_dir() -> String {
     std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default()
@@ -395,8 +519,7 @@ async fn diagnostics_view(app: AppHandle) -> Result<serde_json::Value, String> {
 /// happened: the crash, the failed cast).
 async fn send_report(app: &AppHandle, kind: &'static str, extra: Option<String>) -> Result<String, String> {
     let info = device_info(app).await;
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let mut head = format!("CastBay Desktop problem report, {}\n", utc(secs));
+    let mut head = format!("CastBay Desktop problem report, {}\n", utc(now_secs()));
     for (label, value) in &info {
         head.push_str(&format!("{label}: {value}\n"));
     }
@@ -498,6 +621,7 @@ async fn install_update(version: String, app: AppHandle) -> Result<String, Strin
     #[cfg(windows)]
     {
         update::install(&file, &exe)?;
+        count_usage(&app, "update.installed");
         quit(&app);
         Ok("installing".into())
     }
@@ -509,6 +633,7 @@ async fn install_update(version: String, app: AppHandle) -> Result<String, Strin
         match result {
             Ok(update::Installed::Yes) => {
                 log(&app, "update: installed");
+                count_usage(&app, "update.installed");
                 update::start_again(&exe)?;
                 quit(&app);
                 Ok("installing".into())
@@ -712,7 +837,21 @@ fn main() {
             let send_by_itself = loaded.error_reports && left.is_some();
             app.manage(PendingCrash(Mutex::new(left.clone())));
             let zh = loaded.chinese(chinese());
+            let usage_on = loaded.usage_stats;
             app.manage(SettingsState(Mutex::new(loaded)));
+            if usage_on {
+                // Switched on in a file or by an older copy of the settings: there must be an ID.
+                usage::turn_on(&data_dir);
+            }
+            // Finished days go out a minute after the start, and every six hours while it runs.
+            let sender = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(60));
+                loop {
+                    send_usage(&sender);
+                    std::thread::sleep(Duration::from_secs(6 * 3600));
+                }
+            });
             // The person turned error reports on: the previous run's end is sent now, without asking.
             if let (true, Some(left)) = (send_by_itself, left) {
                 let handle = app.handle().clone();

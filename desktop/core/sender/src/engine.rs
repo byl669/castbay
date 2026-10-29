@@ -23,15 +23,15 @@ enum Enc {
 }
 
 impl Enc {
-    /// Opens the chosen encoder, or with None the first that works: AMD, NVIDIA, then x264.
-    fn open(config: &Config, codec: Option<Codec>) -> Result<Enc, castbay_encode::Error> {
+    /// Opens the chosen encoder, or with None the first that works: AMD, NVIDIA, then x264; and says which.
+    fn open(config: &Config, codec: Option<Codec>) -> Result<(Enc, Codec), castbay_encode::Error> {
         match codec {
-            Some(codec) => Enc::new(config, codec),
+            Some(codec) => Enc::new(config, codec).map(|enc| (enc, codec)),
             None => {
                 let mut last = None;
                 for codec in [Codec::Amf, Codec::Nvenc, Codec::X264] {
                     match Enc::new(config, codec) {
-                        Ok(enc) => return Ok(enc),
+                        Ok(enc) => return Ok((enc, codec)),
                         Err(e) => last = Some(e),
                     }
                 }
@@ -140,6 +140,8 @@ fn run_audio(mut enc: Box<dyn Aac>, session_ref: Arc<Mutex<Option<Session>>>, ov
 
 struct State {
     encoder: Option<Enc>,
+    /// Which encoder it is: amf, nvenc, x264 (empty before one opened).
+    encoder_name: &'static str,
     nv12: Vec<u8>,
     have_picture: bool,
     last: Instant,
@@ -177,7 +179,15 @@ fn push(st: &mut State, link: &Session, captured: Instant, started: Instant, con
     if st.encoder.is_none() {
         let config = Config { bitrate_bps: st.rate.current(), ..config.clone() };
         match Enc::open(&config, codec) {
-            Ok(e) => st.encoder = Some(e),
+            Ok((e, used)) => {
+                st.encoder = Some(e);
+                st.encoder_name = match used {
+                    Codec::Amf => "amf",
+                    Codec::Nvenc => "nvenc",
+                    Codec::Qsv => "qsv",
+                    Codec::X264 => "x264",
+                };
+            }
             Err(e) => {
                 st.failed = Some(Failure::new("encoder", e.to_string()));
                 return;
@@ -315,6 +325,7 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
     let session_ref = Arc::new(Mutex::new(Some(session)));
     let state = Arc::new(Mutex::new(State {
         encoder: None,
+        encoder_name: "",
         nv12: vec![0; (width * height * 3 / 2) as usize],
         have_picture: false,
         last: Instant::now(),
@@ -559,6 +570,7 @@ fn report(state: &Arc<Mutex<State>>, started: Instant, stop: &Arc<AtomicBool>, o
         audio_frames,
         final_bitrate_bps: st.rate.current(),
         bitrate_changes: st.bitrate_changes,
+        encoder: st.encoder_name.to_string(),
         ended: ended.clone(),
     };
     match &st.failed {

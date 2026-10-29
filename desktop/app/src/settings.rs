@@ -14,11 +14,15 @@ pub struct Settings {
     /// Pictures per second: 30 or 60.
     pub fps: u32,
     pub send_audio: bool,
+    /// Minimise the window when a cast has started (the tray icon and the taskbar still reach it).
+    pub minimize_on_cast: bool,
     /// Send a problem report by itself when the program ended badly or a cast failed (off until the
     /// person turns it on; otherwise they are asked after a crash).
     pub error_reports: bool,
     /// Look for a newer version when the program starts (the Check for updates button always works).
     pub check_updates: bool,
+    /// Send anonymous usage statistics, once a day (off until the person turns it on; usage.rs).
+    pub usage_stats: bool,
     /// `auto`, `amf`, `nvenc` or `x264`.
     pub encoder: String,
     /// `auto` (follow the system), `zh` or `en`.
@@ -41,8 +45,10 @@ impl Default for Settings {
             bitrate_mbps: 8,
             fps: 30,
             send_audio: true,
+            minimize_on_cast: true,
             error_reports: false,
             check_updates: true,
+            usage_stats: false,
             encoder: "auto".into(),
             language: "auto".into(),
             last_receiver: String::new(),
@@ -113,8 +119,10 @@ impl Settings {
                 "language" => next.language = choice(value, &LANGUAGES, key)?,
                 "source_kind" => next.source_kind = choice(value, &KINDS, key)?,
                 "send_audio" => next.send_audio = boolean(value, key)?,
+                "minimize_on_cast" => next.minimize_on_cast = boolean(value, key)?,
                 "error_reports" => next.error_reports = boolean(value, key)?,
                 "check_updates" => next.check_updates = boolean(value, key)?,
+                "usage_stats" => next.usage_stats = boolean(value, key)?,
                 "welcome_done" => next.welcome_done = boolean(value, key)?,
                 "migrated" => next.migrated = boolean(value, key)?,
                 "last_receiver" => next.last_receiver = text(value, key)?,
@@ -283,11 +291,11 @@ mod tests {
     fn restoring_the_defaults_keeps_what_the_person_picked_last() {
         let mut s = Settings::default();
         s.apply(&json!({"fps": 60, "bitrate_mbps": 15, "encoder": "x264", "language": "zh", "send_audio": false, "error_reports": true,
-            "check_updates": false, "last_receiver": "tv-1", "source_kind": "window", "source_window": "Notes", "welcome_done": true})).unwrap();
+            "check_updates": false, "usage_stats": true, "last_receiver": "tv-1", "source_kind": "window", "source_window": "Notes", "welcome_done": true})).unwrap();
         s.restore_defaults();
         let fresh = Settings::default();
         assert_eq!((s.fps, s.bitrate_mbps, s.encoder.as_str(), s.language.as_str()), (fresh.fps, fresh.bitrate_mbps, "auto", "auto"));
-        assert_eq!((s.send_audio, s.error_reports, s.check_updates), (true, false, true));
+        assert_eq!((s.send_audio, s.error_reports, s.check_updates, s.usage_stats, s.minimize_on_cast), (true, false, true, false, true));
         assert_eq!((s.last_receiver.as_str(), s.source_kind.as_str(), s.source_window.as_str(), s.welcome_done), ("tv-1", "window", "Notes", true));
     }
 

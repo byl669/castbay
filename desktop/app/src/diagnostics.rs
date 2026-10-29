@@ -169,25 +169,23 @@ pub fn system_line() -> String {
     }
 }
 
-/// Sends `text` and returns the report's ID: to the website, and if it cannot be reached, to its
-/// relay. A refusal by the website is final (the relay would pass the same on).
-/// `kind` is `manual`, `crash` or `failure` (what the website files it under).
-pub fn upload(text: &str, version: &str, kind: &str, dir: &Path) -> Result<String, Refusal> {
+/// POSTs `text` to `path` of the website, and if it cannot be reached, of its relay: the status
+/// and the answer. Whatever answer comes (an error status too) is final; only a failure to reach
+/// an address tries the next one. `headers` are whole lines (`Name: value`).
+pub fn post(path: &str, content_type: &str, headers: &[String], text: &str, dir: &Path) -> Result<(u16, String), Refusal> {
     std::fs::create_dir_all(dir).map_err(|e| Refusal::Network(e.to_string()))?;
-    let file = dir.join("report.txt");
+    let file = dir.join("post.txt");
     std::fs::write(&file, text).map_err(|e| Refusal::Network(e.to_string()))?;
     let mut last = Refusal::Network("no address".into());
-    for url in [SITE, RELAY] {
+    for base in [SITE, RELAY] {
         let mut command = Command::new("curl");
         command
             .args(["--silent", "--show-error", "--proto", "=https", "--connect-timeout", "15", "--max-time", "90", "--request", "POST"])
-            .args(["--header", "Content-Type: text/plain; charset=utf-8"])
-            .args(["--header", &format!("X-CastBay-Version: {version}")])
-            .args(["--header", &format!("X-CastBay-Report: {kind}"), "--header", "X-CastBay-App: desktop"])
-            .arg("--data-binary")
-            .arg(format!("@{}", file.display()))
-            .args(["--write-out", "\n%{http_code}"])
-            .arg(url);
+            .args(["--header", &format!("Content-Type: {content_type}")]);
+        for header in headers {
+            command.args(["--header", header]);
+        }
+        command.arg("--data-binary").arg(format!("@{}", file.display())).args(["--write-out", "\n%{http_code}"]).arg(format!("{base}{path}"));
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -200,22 +198,54 @@ pub fn upload(text: &str, version: &str, kind: &str, dir: &Path) -> Result<Strin
                 continue;
             }
         };
-        let stdout = String::from_utf8_lossy(&output.stdout);
         if !output.status.success() {
             let line = String::from_utf8_lossy(&output.stderr).lines().last().unwrap_or("").trim().to_string();
             last = Refusal::Network(if line.is_empty() { output.status.to_string() } else { line });
             continue;
         }
-        let (body, code) = stdout.rsplit_once('\n').unwrap_or(("", &stdout));
         let _ = std::fs::remove_file(&file);
-        return match (code.trim().parse::<u16>(), parse_id(body)) {
-            (Ok(201), Some(id)) => Ok(id),
-            (Ok(code), _) => Err(Refusal::Status(code)),
-            _ => Err(Refusal::Network("unreadable answer".into())),
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let (body, code) = stdout.rsplit_once('\n').unwrap_or(("", &stdout));
+        return match code.trim().parse::<u16>() {
+            Ok(code) => Ok((code, body.to_string())),
+            Err(_) => Err(Refusal::Network("unreadable answer".into())),
         };
     }
     let _ = std::fs::remove_file(&file);
     Err(last)
+}
+
+/// Sends a problem report and returns its ID. `kind` is `manual`, `crash` or `failure` (what the
+/// website files it under).
+pub fn upload(text: &str, version: &str, kind: &str, dir: &Path) -> Result<String, Refusal> {
+    let headers = [format!("X-CastBay-Version: {version}"), format!("X-CastBay-Report: {kind}"), "X-CastBay-App: desktop".to_string()];
+    match post("/api/reports", "text/plain; charset=utf-8", &headers, text, dir)? {
+        (201, body) => parse_id(&body).ok_or_else(|| Refusal::Network("unreadable answer".into())),
+        (code, _) => Err(Refusal::Status(code)),
+    }
+}
+
+/// Windows' version from `ver`'s line ("Microsoft Windows [Version 10.0.19045.5555]"): 10.0.19045.
+pub fn windows_version(line: &str) -> Option<String> {
+    let v = line.split("Version ").nth(1)?.trim_end_matches(']').trim();
+    let parts: Vec<&str> = v.split('.').take(3).collect();
+    (parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))).then(|| parts.join("."))
+}
+
+/// A Linux distribution from /etc/os-release, as "ubuntu 26.04" (just the ID when it has no version).
+pub fn linux_distribution(os_release: &str) -> String {
+    let value = |key: &str| {
+        os_release
+            .lines()
+            .find_map(|l| l.strip_prefix(key))
+            .map(|v| v.trim().trim_matches('"').to_ascii_lowercase())
+            .filter(|v| !v.is_empty() && v.len() <= 20 && v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-'))
+    };
+    match (value("ID="), value("VERSION_ID=")) {
+        (Some(id), Some(version)) => format!("{id} {version}"),
+        (Some(id), None) => id,
+        _ => "linux".into(),
+    }
 }
 
 /// The ID in the website's answer (`{"id":"CB-7K3F9Q"}`), if it has the shape of one.
@@ -270,6 +300,17 @@ mod tests {
         assert!(text.len() <= MAX_CHARS, "{}", text.len());
         assert!(text.contains("<ip>") && text.contains("<name>") && !text.contains("10.1.1."));
         assert!(text.starts_with("CastBay Desktop 0.1.4"));
+    }
+
+    #[test]
+    fn the_system_is_named_coarsely() {
+        assert_eq!(windows_version("Microsoft Windows [Version 10.0.19045.5555]").as_deref(), Some("10.0.19045"));
+        assert_eq!(windows_version("Windows"), None);
+        assert_eq!(linux_distribution("NAME=\"Ubuntu\"\nID=ubuntu\nVERSION_ID=\"26.04\"\n"), "ubuntu 26.04");
+        assert_eq!(linux_distribution("ID=arch\n"), "arch");
+        assert_eq!(linux_distribution("PRETTY_NAME=x"), "linux");
+        // Anything odd is not passed on.
+        assert_eq!(linux_distribution("ID=\"a b c d\"\nVERSION_ID=1"), "linux");
     }
 
     #[test]
