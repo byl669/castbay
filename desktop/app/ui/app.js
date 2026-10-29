@@ -201,7 +201,7 @@ function renderReceivers() {
     const pick = () => { selected = r; save({ last_receiver: r.id }); renderReceivers(); };
     list.append(el("li", { role: "option", "aria-selected": String(on), tabindex: "0", onclick: pick, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } } },
       el("span", { class: "badge" }, icon("tv")),
-      el("div", { class: "grow" }, el("div", { class: "name", text: r.name }), el("div", { class: "meta", text: pairText(r) })),
+      el("div", { class: "grow" }, el("div", { class: "name", text: r.name }), el("div", { class: "meta", text: [r.ip, pairText(r)].join(" · ") })),
       el("span", { class: "end" }, on ? icon("check") : r.password ? icon("lock") : null)));
   }
   $("empty").hidden = receivers.length > 0;
@@ -270,7 +270,7 @@ function startCast() {
 
 function resetCasting() {
   $("state-line").textContent = t("connecting");
-  $("receiver-line").textContent = selected?.name ?? "";
+  $("receiver-line").textContent = selected ? `${selected.name} · ${selected.ip}` : "";
   $("detail-line").textContent = "";
   $("code-box").hidden = true;
   $("lock-note").hidden = true;
@@ -293,7 +293,7 @@ function onStatus(s) {
     case "casting":
       $("code-box").hidden = true;
       $("state-line").textContent = t("casting");
-      $("receiver-line").textContent = s.receiver;
+      $("receiver-line").textContent = selected?.ip ? `${s.receiver} · ${selected.ip}` : s.receiver;
       $("detail-line").textContent = [`${s.width}×${s.height}`, t("fps_n", castNote.fps), t(castNote.audio ? "with_audio" : "no_audio")].join(" · ");
       break;
     case "reconnecting": $("state-line").textContent = t("reconnecting"); break;
