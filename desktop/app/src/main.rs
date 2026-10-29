@@ -304,6 +304,30 @@ fn open_with_system(target: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The encoders that open on this computer, as the names settings.json uses (the first call
+/// tries each, which takes a moment; the answer is kept).
+#[tauri::command]
+async fn encoders() -> Vec<&'static str> {
+    static FOUND: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    if let Some(found) = FOUND.get() {
+        return found.clone();
+    }
+    let found = tauri::async_runtime::spawn_blocking(|| {
+        castbay_sender::available_encoders()
+            .into_iter()
+            .map(|codec| match codec {
+                Codec::Amf => "amf",
+                Codec::Nvenc => "nvenc",
+                Codec::Qsv => "qsv",
+                Codec::X264 => "x264",
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_default();
+    FOUND.get_or_init(|| found).clone()
+}
+
 /// Downloads and installs a newer version (see `update`). `Ok("installing")`: Windows is replacing
 /// this program and starts it again; `Ok("opened")`: the system's installer was opened (Linux).
 /// `Err("manual")`: this is not an installed copy (the portable zip, a development build), so the
@@ -583,7 +607,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, set_settings, list_paired, discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, install_update, autostart_get, autostart_set])
+        .invoke_handler(tauri::generate_handler![get_settings, set_settings, list_paired, discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, install_update, encoders, autostart_get, autostart_set])
         .run(tauri::generate_context!())
         .expect("the CastBay Desktop window failed to start");
 }

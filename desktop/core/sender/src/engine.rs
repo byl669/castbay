@@ -61,6 +61,13 @@ impl Enc {
     }
 }
 
+/// The encoders that open on this computer, in the order "automatic" tries them. A hardware
+/// encoder is tried with a small picture and closed again at once, so this takes a moment.
+pub fn available_encoders() -> Vec<Codec> {
+    let config = Config { width: 640, height: 360, fps: 30, bitrate_bps: 2_000_000, gop: 60 };
+    [Codec::Amf, Codec::Nvenc, Codec::X264].into_iter().filter(|codec| Enc::new(&config, *codec).is_ok()).collect()
+}
+
 /// AAC-LC encoding for the cast's audio; only the in-process encoder build has one.
 trait Aac: Send {
     fn config(&self) -> Vec<u8>;

@@ -23,7 +23,7 @@ const TEXT = {
     fps_n: "{0} 帧",
     s_quality: "画质", s_bitrate: "码率", s_fps: "帧率", fps_30: "30 帧", fps_60: "60 帧",
     qn: "码率是上限：网络跟不上时会自动降低，再慢慢回升。码率越高画面越清晰，也越占网络；60 帧让动态画面（游戏、拖动窗口）更跟手，建议同时把码率调到 8 Mbit/s 以上。",
-    s_audio: "同时传声音", s_encoder: "编码器", e_auto: "自动", e_cpu: "CPU（x264）", encoder_note: "自动会依次尝试 AMD、NVIDIA，最后用 CPU。",
+    s_audio: "同时传声音", s_encoder: "编码器", e_auto: "自动（推荐）", e_amf: "显卡加速（AMD）", e_nvenc: "显卡加速（NVIDIA）", e_x264: "CPU 软件编码", e_off: "（这台电脑不可用）", encoder_note: "显卡加速用显卡里专门的视频编码单元，几乎不占 CPU，延迟也更低；CPU 软件编码任何电脑都能用，但会占用 CPU。自动：有可用的显卡加速就用它，没有就用 CPU。选项里只列出这台电脑能用的。",
     s_general: "通用", s_autostart: "开机自动启动", s_language: "语言", lang_auto: "跟随系统", s_paired: "已配对的接收端",
     s_about: "关于", s_version: "版本", s_check_update: "检查更新", s_logs: "打开日志文件夹", s_license: "开源许可证与源码",
     up_checking: "正在检查…", up_latest: "已是最新", up_new: "有新版本 {0}", up_failed: "检查失败", up_dev: "开发版",
@@ -59,7 +59,7 @@ const TEXT = {
     fps_n: "{0} fps",
     s_quality: "Quality", s_bitrate: "Bitrate", s_fps: "Frame rate", fps_30: "30 fps", fps_60: "60 fps",
     qn: "The bitrate is a ceiling: when the network cannot keep up it is lowered by itself and creeps back up. A higher bitrate means a sharper picture and more network use; 60 fps makes motion (games, dragging windows) follow more closely, and wants 8 Mbit/s or more.",
-    s_audio: "Send sound too", s_encoder: "Encoder", e_auto: "Automatic", e_cpu: "CPU (x264)", encoder_note: "Automatic tries AMD, then NVIDIA, then the CPU.",
+    s_audio: "Send sound too", s_encoder: "Encoder", e_auto: "Automatic (recommended)", e_amf: "Graphics card (AMD)", e_nvenc: "Graphics card (NVIDIA)", e_x264: "CPU (software)", e_off: " (not available on this computer)", encoder_note: "A graphics card encodes with its own video unit: it hardly uses the CPU and adds less delay. The CPU can do it on any computer but is busier. Automatic uses a graphics card when one works, else the CPU. Only what works on this computer is listed.",
     s_general: "General", s_autostart: "Start with Windows", s_language: "Language", lang_auto: "Follow the system", s_paired: "Paired receivers",
     s_about: "About", s_version: "Version", s_check_update: "Check for updates", s_logs: "Open log folder", s_license: "Licence and source code",
     up_checking: "Checking…", up_latest: "Up to date", up_new: "Version {0} is available", up_failed: "Could not check", up_dev: "Development build",
@@ -323,13 +323,34 @@ function endCast() {
 }
 
 // ---------------------------------------------------------------- settings page
+// The encoder list: automatic, and each of the others only if it opens on this computer (found once,
+// the first time, as trying a graphics card takes a moment). A saved choice that no longer works stays
+// shown as it is, marked, so the page does not say something else than what will happen.
+let encoderNames = null;
+async function fillEncoders() {
+  const select = $("encoder");
+  const show = (names) => {
+    select.replaceChildren(el("option", { value: "auto", text: t("e_auto") }));
+    for (const name of ["nvenc", "amf", "x264"]) {
+      const there = names.includes(name);
+      if (there || settings.encoder === name) select.append(el("option", { value: name, text: t("e_" + name) + (there ? "" : t("e_off")) }));
+    }
+    select.value = settings.encoder;
+  };
+  show(encoderNames ?? ["x264"]);
+  if (!encoderNames) {
+    try { encoderNames = await invoke("encoders"); } catch { encoderNames = ["x264"]; }
+    show(encoderNames);
+  }
+}
+
 function renderSettings() {
   document.querySelectorAll("#view-settings .fps button").forEach((b) => b.setAttribute("aria-checked", String(Number(b.dataset.fps) === settings.fps)));
   $("bitrate").value = settings.bitrate_mbps;
   $("bitrate-value").textContent = `${settings.bitrate_mbps} Mbit/s`;
   $("quality-note").textContent = t("qn");
   $("audio").setAttribute("aria-checked", String(!!settings.send_audio));
-  $("encoder").value = settings.encoder;
+  fillEncoders();
   $("language").value = settings.language;
   $("paired-count").textContent = paired.length ? String(paired.length) : "";
 }

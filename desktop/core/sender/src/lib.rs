@@ -12,6 +12,8 @@ pub use castbay_encode::ffmpeg::Codec;
 
 #[cfg(any(windows, target_os = "linux"))]
 mod engine;
+#[cfg(any(windows, target_os = "linux"))]
+pub use engine::available_encoders;
 #[cfg(windows)]
 mod power;
 #[cfg(target_os = "linux")]
