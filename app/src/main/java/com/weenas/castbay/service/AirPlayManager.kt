@@ -196,6 +196,7 @@ class AirPlayManager private constructor(private val context: Context) {
         }
     }
     private val dlna = com.weenas.castbay.dlna.DlnaReceiver(context)
+    private val plex = com.weenas.castbay.plex.PlexReceiver(context)
     /** The running receiver's settings (DLNA checks the second-device policy against them). */
     @Volatile private var activeSettings = ReceiverSettings()
 
@@ -490,6 +491,8 @@ class AirPlayManager private constructor(private val context: Context) {
         mainHandler.postDelayed(startupWatchdog, STARTUP_TIMEOUT_MS)
         // DLNA (video apps' own cast buttons, e.g. Bilibili's) runs beside AirPlay.
         if (settings.dlnaEnabled) Thread({ dlna.start(settings.advertisedName, dlnaTarget) }, "DLNA-start").start()
+        // Plex (the official app's "play to device") runs beside AirPlay and DLNA; a failure only logs.
+        if (settings.dlnaEnabled) Thread({ plex.start(settings.advertisedName) }, "Plex-start").start()
         // CastBay Desktop: computers casting over CastBay Link.
         if (settings.desktopEnabled) {
             Thread({
@@ -551,6 +554,7 @@ class AirPlayManager private constructor(private val context: Context) {
         hidePairingPin()
         discoveryAdvertiser.stop()
         dlna.stop()
+        plex.stop()
         linkDiscovery.stop()
         linkServer.stop()
         desktopSession = null
