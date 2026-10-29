@@ -32,7 +32,10 @@ class LinkDiscovery(context: Context) {
             "v" to LinkProtocol.VERSION.toString(),
             "id" to receiverId,
             "name" to displayName,
-            "pair" to pairMode(settings)
+            "pair" to pairMode(settings),
+            // So a sender's list can tell receivers apart (two with the same name): the TV's model and the app's version.
+            "model" to android.os.Build.MODEL.take(40),
+            "app" to com.weenas.castbay.util.AppVersion.name(appContext).take(20)
         )
         if (settings.requiredPassword().isNotEmpty()) attributes["pw"] = "1"
         own = "castbay-" + receiverId.takeLast(6).lowercase() to MdnsService(TYPE, displayName, port, attributes)
