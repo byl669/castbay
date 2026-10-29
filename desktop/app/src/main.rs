@@ -8,7 +8,7 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use castbay_sender::{Codec, Options, Status, Stopper, Target};
+use castbay_sender::{Codec, Options, Status, Stopper, Switcher, Target};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 mod crash;
@@ -73,6 +73,8 @@ struct PendingCrash(Mutex<Option<crash::Pending>>);
 #[derive(Default)]
 struct Casting {
     stopper: Mutex<Option<Stopper>>,
+    /// Changes what the running cast captures.
+    switcher: Mutex<Option<Switcher>>,
     /// Where the page's answer to "type the code on the TV" goes.
     code: Mutex<Option<Sender<Option<String>>>>,
 }
@@ -151,6 +153,9 @@ fn status_json(status: &Status) -> serde_json::Value {
         Status::Reconnecting(reason) => json!({"kind": "reconnecting", "reason": reason}),
         Status::Reconnected => json!({"kind": "reconnected"}),
         Status::Bitrate(bps) => json!({"kind": "bitrate", "bps": bps}),
+        Status::SourceLost => json!({"kind": "source_lost"}),
+        Status::Switched => json!({"kind": "switched"}),
+        Status::SwitchFailed(reason) => json!({"kind": "switch_failed", "reason": reason}),
         Status::ScreenLocked(locked) => json!({"kind": "locked", "locked": locked}),
         Status::Receiver { decode_ms, dropped, fps } => json!({"kind": "stats", "decode_ms": decode_ms, "dropped": dropped, "fps": fps}),
         Status::Ended(reason) => json!({"kind": "ended", "reason": reason}),
@@ -212,6 +217,8 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>, settin
                 }
             }
             Status::Ended(reason) if reason != "stopped" => bring_back(&emitter),
+            // What is cast went away and the cast waits: the window comes back to choose another.
+            Status::SourceLost => bring_back(&emitter),
             _ => {}
         }
         let _ = emitter.emit("status", status_json(&status));
@@ -226,6 +233,7 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>, settin
     count_usage(&app, if settings.send_audio { "sound.on" } else { "sound.off" });
     let handle = castbay_sender::start(options, on_status, ask);
     *state.stopper.lock().unwrap() = Some(handle.stopper());
+    *state.switcher.lock().unwrap() = Some(handle.switcher());
 
     // Waits for the end, tells the page, and frees the slot for the next cast.
     let app = app.clone();
@@ -246,6 +254,7 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>, settin
         }
         let state = app.state::<Casting>();
         *state.stopper.lock().unwrap() = None;
+        *state.switcher.lock().unwrap() = None;
         *state.code.lock().unwrap() = None;
         if let Err(failure) = outcome {
             log(&app, &format!("failed: {} ({})", failure.code, failure.detail));
@@ -660,6 +669,24 @@ fn open_logs(app: AppHandle) -> Result<(), String> {
     open_with_system(&dir.to_string_lossy())
 }
 
+/// Casts another window or screen from now on, without ending the cast (`kind` is `monitor` or
+/// `window`, `value` the monitor's number or the window's title, as when starting).
+#[tauri::command]
+fn switch_source(kind: String, value: String, state: State<'_, Casting>) -> Result<(), String> {
+    let target = match kind.as_str() {
+        "window" if !value.is_empty() => Target::Window(value),
+        "window" => return Err("no window named".into()),
+        _ => Target::Monitor(value.parse().unwrap_or(0)),
+    };
+    match state.switcher.lock().unwrap().as_ref() {
+        Some(switcher) => {
+            switcher.switch(target);
+            Ok(())
+        }
+        None => Err("no cast is running".into()),
+    }
+}
+
 #[tauri::command]
 fn stop_cast(state: State<'_, Casting>) {
     if let Some(stopper) = state.stopper.lock().unwrap().as_ref() {
@@ -902,7 +929,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, set_settings, reset_settings, list_paired, discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, install_update, encoders, diagnostics_view, upload_report, crash_pending, send_crash_report, dismiss_crash, autostart_get, autostart_set])
+        .invoke_handler(tauri::generate_handler![get_settings, set_settings, reset_settings, list_paired, discover, sources, start_cast, submit_code, switch_source, stop_cast, forget_receiver, open_logs, open_release, install_update, encoders, diagnostics_view, upload_report, crash_pending, send_crash_report, dismiss_crash, autostart_get, autostart_set])
         .run(tauri::generate_context!())
         .expect("the CastBay Desktop window failed to start");
 }

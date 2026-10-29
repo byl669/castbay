@@ -65,9 +65,9 @@ pub enum Ended {
 }
 
 /// Captures `target` until `on_frame` returns false, `stop` says so, or the source closes; frames
-/// are only valid inside the callback. The same call on every platform. (Windows looks at `stop`
-/// when a picture arrives; Linux also while none does, which it must: the screen share the
-/// system shows stays open as long as this runs.)
+/// are only valid inside the callback. The same call on every platform. (Both look at `stop`
+/// while no picture arrives too: a window that shows nothing new can be left, and the screen
+/// share the system shows on Linux stays open as long as this runs.)
 pub fn run(
     target: &Target,
     stop: impl Fn() -> bool + Send + 'static,
@@ -75,7 +75,7 @@ pub fn run(
 ) -> Result<Ended, Error> {
     #[cfg(windows)]
     {
-        windows::run(target, move |frame| !stop() && on_frame(frame))
+        windows::run(target, stop, on_frame)
     }
     #[cfg(target_os = "linux")]
     {

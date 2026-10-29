@@ -22,6 +22,8 @@ struct Flags {
     callback: Callback,
     started: Instant,
     closed: Arc<AtomicBool>,
+    /// The capture is over: the callback said stop, or the source closed.
+    done: Arc<AtomicBool>,
 }
 
 struct Handler {
@@ -55,6 +57,7 @@ impl GraphicsCaptureApiHandler for Handler {
             timestamp: self.flags.started.elapsed(),
         });
         if !keep_going {
+            self.flags.done.store(true, Ordering::SeqCst);
             control.stop();
         }
         Ok(())
@@ -62,21 +65,26 @@ impl GraphicsCaptureApiHandler for Handler {
 
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         self.flags.closed.store(true, Ordering::SeqCst);
+        self.flags.done.store(true, Ordering::SeqCst);
         Ok(())
     }
 }
 
-/// Captures `target` until `on_frame` returns false or the source closes; frames are only
-/// valid inside the callback.
+/// Captures `target` until `on_frame` returns false, `stop` says so (looked at every 30 ms, so a
+/// window that shows nothing new can be left too) or the source closes; frames are only valid
+/// inside the callback.
 pub fn run(
     target: &Target,
+    stop: impl Fn() -> bool + Send + 'static,
     on_frame: impl FnMut(Frame<'_>) -> bool + Send + 'static,
 ) -> Result<Ended, Error> {
     let closed = Arc::new(AtomicBool::new(false));
+    let done = Arc::new(AtomicBool::new(false));
     let flags = Arc::new(std::sync::Mutex::new(Some(Flags {
         callback: Box::new(on_frame),
         started: Instant::now(),
         closed: closed.clone(),
+        done: done.clone(),
     })));
 
     macro_rules! start {
@@ -91,25 +99,31 @@ pub fn run(
                 ColorFormat::Bgra8,
                 flags,
             );
-            Handler::start(settings).map_err(|e| Error::Platform(e.to_string()))?
+            Handler::start_free_threaded(settings).map_err(|e| Error::Platform(e.to_string()))?
         }};
     }
 
-    match target {
+    let control = match target {
         Target::Monitor(index) => {
             let monitors = Monitor::enumerate().map_err(|e| Error::Platform(e.to_string()))?;
             let monitor = monitors
                 .get(*index)
                 .copied()
                 .ok_or_else(|| Error::NotFound(format!("monitor {index}")))?;
-            start!(monitor);
+            start!(monitor)
         }
         Target::Window(title) => {
             let window = Window::from_contains_name(title)
                 .map_err(|_| Error::NotFound(format!("window containing \"{title}\"")))?;
-            start!(window);
+            start!(window)
         }
+    };
+
+    // The capture runs on a thread of its own; this one waits for its end or for the stop.
+    while !done.load(Ordering::SeqCst) && !stop() {
+        std::thread::sleep(Duration::from_millis(30));
     }
+    let _ = control.stop();
 
     Ok(if closed.load(Ordering::SeqCst) { Ended::SourceClosed } else { Ended::Stopped })
 }

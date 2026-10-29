@@ -60,6 +60,13 @@ pub enum Status {
     Receiver { decode_ms: i64, dropped: u64, fps: f64 },
     /// The bitrate in use changed (the connection could not keep up, or has recovered), in bit/s.
     Bitrate(u32),
+    /// What is cast went away (the window was closed): the cast goes on with the last picture
+    /// and waits for [`Switcher::switch`] to name something else.
+    SourceLost,
+    /// A new target was asked for and is being captured now.
+    Switched,
+    /// The new target could not be captured; the cast goes on with the old one (or keeps waiting).
+    SwitchFailed(String),
     /// The PC's screen is locked (true) or unlocked again (false): Windows gives nothing to capture
     /// meanwhile, so the picture stays as it was.
     ScreenLocked(bool),
@@ -134,6 +141,7 @@ pub type OnStatus = Arc<dyn Fn(Status) + Send + Sync>;
 /// A running cast.
 pub struct Handle {
     stop: Arc<std::sync::atomic::AtomicBool>,
+    switch: Arc<std::sync::Mutex<Option<Target>>>,
     result: std::sync::mpsc::Receiver<Result<Report, Failure>>,
     finished: std::cell::Cell<Option<Result<Report, Failure>>>,
 }
@@ -148,6 +156,19 @@ impl Stopper {
     }
 }
 
+/// Changes what a cast in progress captures, from anywhere: the receiver stays connected and the
+/// picture goes on at the size it started with (a different shape gets black bars).
+#[derive(Clone)]
+pub struct Switcher(Arc<std::sync::Mutex<Option<Target>>>);
+
+impl Switcher {
+    /// Asks the cast to capture `target` from now on. [`Status::Switched`] or
+    /// [`Status::SwitchFailed`] follows.
+    pub fn switch(&self, target: Target) {
+        *self.0.lock().unwrap() = Some(target);
+    }
+}
+
 impl Handle {
     /// Asks the cast to end; [`Handle::join`] waits for it.
     pub fn stop(&self) {
@@ -156,6 +177,10 @@ impl Handle {
 
     pub fn stopper(&self) -> Stopper {
         Stopper(self.stop.clone())
+    }
+
+    pub fn switcher(&self) -> Switcher {
+        Switcher(self.switch.clone())
     }
 
     /// Waits for the cast to end and returns how it went.
@@ -186,18 +211,20 @@ pub fn start(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) ->
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let flag = stop.clone();
     let (tx, result) = std::sync::mpsc::channel();
+    let switch = Arc::new(std::sync::Mutex::new(None));
+    let switch_for_engine = switch.clone();
     std::thread::Builder::new()
         .name("castbay-cast".into())
-        .spawn(move || engine::run(options, on_status, code, flag, tx))
+        .spawn(move || engine::run(options, on_status, code, flag, switch_for_engine, tx))
         .expect("a thread");
-    Handle { stop, result, finished: std::cell::Cell::new(None) }
+    Handle { stop, switch, result, finished: std::cell::Cell::new(None) }
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
 pub fn start(_: Options, _: OnStatus, _: Box<dyn FnMut(&str) -> Option<String> + Send>) -> Handle {
     let (tx, result) = std::sync::mpsc::channel();
     let _ = tx.send(Err(Failure::new("other", "casting is not implemented on this system")));
-    Handle { stop: Arc::new(std::sync::atomic::AtomicBool::new(true)), result, finished: std::cell::Cell::new(None) }
+    Handle { stop: Arc::new(std::sync::atomic::AtomicBool::new(true)), switch: Arc::new(std::sync::Mutex::new(None)), result, finished: std::cell::Cell::new(None) }
 }
 
 #[cfg(test)]

@@ -171,6 +171,43 @@ struct State {
     frames_taken: u64,
 }
 
+/// What the capture does with each picture: made again for each run of the capture (see the loop
+/// that starts it), as a run ends with its closure.
+fn capture_callback<O: Fn() -> bool + Send + 'static>(
+    over: O,
+    state: Arc<Mutex<State>>,
+    session_ref: Arc<Mutex<Option<castbay_link::Session>>>,
+    capture_status: OnStatus,
+    (width, height, interval, started, encoder_config, codec): (u32, u32, Duration, Instant, Config, Option<Codec>),
+) -> impl FnMut(castbay_capture::Frame<'_>) -> bool + Send + 'static {
+    move |frame| {
+        if over() {
+            return false;
+        }
+        let mut st = state.lock().unwrap();
+        if st.failed.is_some() || st.ended.is_some() {
+            return false;
+        }
+        st.frames_seen += 1;
+        if st.last.elapsed() + interval / 4 >= interval || !st.have_picture {
+            if frame.width >= 2 && frame.height >= 2 {
+                let mut nv12 = std::mem::take(&mut st.nv12);
+                bgra_to_nv12_fit(frame.data, frame.stride, frame.width as usize, frame.height as usize, width as usize, height as usize, &mut nv12);
+                st.nv12 = nv12;
+                st.have_picture = true;
+                st.frames_taken += 1;
+                if let Some(link) = session_ref.lock().unwrap().as_ref() {
+                    push(&mut st, link, Instant::now(), started, &encoder_config, codec, false);
+                    if let Some(bps) = st.announce_bitrate.take() {
+                        capture_status(Status::Bitrate(bps));
+                    }
+                }
+            }
+        }
+        true
+    }
+}
+
 /// Pushes the current picture into the encoder and sends what came out.
 fn push(st: &mut State, link: &Session, captured: Instant, started: Instant, config: &Config, codec: Option<Codec>, repeat: bool) {
     if st.lost.is_some() {
@@ -243,13 +280,13 @@ fn push(st: &mut State, link: &Session, captured: Instant, started: Instant, con
 /// Runs the cast and delivers its result through `done`. The thread that calls this ends up
 /// running the capture itself (the capture library wants to own its thread's message loop), so
 /// a supervisor thread watches for the end and reports it.
-pub fn run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, done: std::sync::mpsc::Sender<Result<Report, Failure>>) {
-    if let Err(e) = setup_and_run(options, on_status, code, stop, done.clone()) {
+pub fn run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, switch: Arc<Mutex<Option<Target>>>, done: std::sync::mpsc::Sender<Result<Report, Failure>>) {
+    if let Err(e) = setup_and_run(options, on_status, code, stop, switch, done.clone()) {
         let _ = done.send(Err(e));
     }
 }
 
-fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, done: std::sync::mpsc::Sender<Result<Report, Failure>>) -> Result<(), Failure> {
+fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str) -> Option<String> + Send>, stop: Arc<AtomicBool>, switch: Arc<Mutex<Option<Target>>>, done: std::sync::mpsc::Sender<Result<Report, Failure>>) -> Result<(), Failure> {
     let Options { addr, receiver_id, name, password, target, fps, bitrate_bps, codec, audio, max_size, data_dir, max_duration } = options;
     castbay_capture::set_data_dir(&data_dir);
     on_status(Status::Connecting);
@@ -497,35 +534,79 @@ fn setup_and_run(options: Options, on_status: OnStatus, code: Box<dyn FnMut(&str
         })
     };
     let result = {
-        let (state, session_ref, over) = (state.clone(), session_ref.clone(), over.clone());
-        let capture_status = on_status.clone();
-        let stop_when = over.clone();
-        castbay_capture::run(&target, move || stop_when(), move |frame| {
-            if over() {
-                return false;
-            }
-            let mut st = state.lock().unwrap();
-            if st.failed.is_some() || st.ended.is_some() {
-                return false;
-            }
-            st.frames_seen += 1;
-            if st.last.elapsed() + interval / 4 >= interval || !st.have_picture {
-                if frame.width >= 2 && frame.height >= 2 {
-                    let mut nv12 = std::mem::take(&mut st.nv12);
-                    bgra_to_nv12_fit(frame.data, frame.stride, frame.width as usize, frame.height as usize, width as usize, height as usize, &mut nv12);
-                    st.nv12 = nv12;
-                    st.have_picture = true;
-                    st.frames_taken += 1;
-                    if let Some(link) = session_ref.lock().unwrap().as_ref() {
-                        push(&mut st, link, Instant::now(), started, &encoder_config, codec, false);
-                        if let Some(bps) = st.announce_bitrate.take() {
-                            capture_status(Status::Bitrate(bps));
+        // What is captured can be changed while the cast runs (`switch`): the capture is left and
+        // started again on the new target, the connection and the encoder stay, and the picture
+        // keeps its size (a different shape gets black bars). On Windows a window that is closed
+        // does not end the cast either: the last picture stays and the cast waits for a new target.
+        enum Mode {
+            Run(Target),
+            Wait,
+        }
+        let mut mode = Mode::Run(target.clone());
+        // Where to go back to if the target just asked for cannot be captured.
+        let mut fallback: Option<Target> = None;
+        let mut switched = false;
+        loop {
+            match mode {
+                Mode::Wait => {
+                    let next = loop {
+                        if over() {
+                            break None;
                         }
+                        if let Some(next) = switch.lock().unwrap().take() {
+                            break Some(next);
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
+                    };
+                    match next {
+                        Some(next) => {
+                            on_status(Status::Switched);
+                            state.lock().unwrap().want_key = true;
+                            fallback = None;
+                            switched = true;
+                            mode = Mode::Run(next);
+                        }
+                        None => break Ok(castbay_capture::Ended::Stopped),
+                    }
+                }
+                Mode::Run(ref current) => {
+                    let current = current.clone();
+                    let seen = state.lock().unwrap().frames_seen;
+                    let stop_when = {
+                        let (over, switch) = (over.clone(), switch.clone());
+                        move || over() || switch.lock().unwrap().is_some()
+                    };
+                    let callback = capture_callback(over.clone(), state.clone(), session_ref.clone(), on_status.clone(), (width, height, interval, started, encoder_config.clone(), codec));
+                    let outcome = castbay_capture::run(&current, stop_when, callback);
+                    let requested = switch.lock().unwrap().take();
+                    let got_picture = state.lock().unwrap().frames_seen > seen;
+                    match outcome {
+                        Ok(castbay_capture::Ended::Stopped) if requested.is_some() && !over() => {
+                            on_status(Status::Switched);
+                            state.lock().unwrap().want_key = true;
+                            fallback = Some(current);
+                            switched = true;
+                            mode = Mode::Run(requested.unwrap());
+                        }
+                        Ok(castbay_capture::Ended::SourceClosed) if cfg!(windows) && !over() => {
+                            on_status(Status::SourceLost);
+                            fallback = None;
+                            mode = Mode::Wait;
+                        }
+                        // The target just asked for gave no picture at all: back to what was there.
+                        Err(e) if switched && !got_picture => {
+                            on_status(Status::SwitchFailed(e.to_string()));
+                            mode = match fallback.take() {
+                                Some(old) => Mode::Run(old),
+                                None => Mode::Wait,
+                            };
+                            switched = false;
+                        }
+                        other => break other,
                     }
                 }
             }
-            true
-        })
+        }
     };
     match result {
         Ok(castbay_capture::Ended::SourceClosed) => {
