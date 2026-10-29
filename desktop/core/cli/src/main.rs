@@ -148,7 +148,7 @@ fn bench_capture(args: &[String]) {
     let stats = std::sync::Arc::new(std::sync::Mutex::new(Stats::default()));
     let shared = stats.clone();
     let limit = Duration::from_secs(seconds);
-    let result = castbay_capture::windows::run(&target, move |frame| {
+    let result = castbay_capture::windows::run(&target, || false, move |frame| {
         let now = Instant::now();
         let mut state = shared.lock().unwrap();
         // The cost of getting at the picture on the CPU: touch every row once.
@@ -239,7 +239,7 @@ fn bench_encode(args: &[String]) {
     let mut next = Duration::ZERO;
     let cpu_before = cpu_time();
     let started = Instant::now();
-    let result = castbay_capture::windows::run(&target, move |frame| {
+    let result = castbay_capture::windows::run(&target, || false, move |frame| {
         let mut st = shared.lock().unwrap();
         st.offered += 1;
         if frame.timestamp < next {
