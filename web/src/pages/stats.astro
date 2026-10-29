@@ -34,6 +34,11 @@ import Page from '../layouts/Page.astro';
     'cast.dlna.mirror': 'DLNA 镜像', 'cast.dlna.music': 'DLNA 音乐', 'cast.dlna.video': 'DLNA 视频',
     'length.under1m': '不到 1 分钟', 'length.1to10m': '1–10 分钟', 'length.over10m': '超过 10 分钟',
     'fail.receiver': '接收器出错', 'fail.decoder': '视频解码器出错', 'fail.video': '视频播放出错',
+    'cast.screen': '整个屏幕', 'cast.window': '单个窗口', 'encoder.nvenc': 'NVIDIA 显卡', 'encoder.amf': 'AMD 显卡', 'encoder.x264': 'CPU（x264）',
+    'fps.30': '30 帧', 'fps.60': '60 帧', 'bitrate.under6': '低于 6 Mbit/s', 'bitrate.6to11': '6–11 Mbit/s', 'bitrate.12plus': '12 Mbit/s 以上',
+    'sound.on': '带声音', 'sound.off': '不带声音', 'fail.encoder': '编码器出错', 'fail.capture': '屏幕捕获出错', 'fail.no_picture': '没有画面',
+    'fail.protocol': '通信出错', 'fail.network': '网络出错', 'update.installed': '在程序里完成了更新',
+    nvenc: 'NVIDIA 显卡', amf: 'AMD 显卡', x264: 'CPU（x264）',
     tv: '电视', car: '车机', other: '其他', touch: '触摸屏', 'no touch': '无触摸屏'
   };
   var SECTIONS = [
@@ -132,6 +137,21 @@ import Page from '../layouts/Page.astro';
         var rows = s[2] ? d.counts.filter(function (r) { return s[2](r.key); }) : d[s[0]];
         grid.appendChild(section(s[1], rows || []));
       });
+      // CastBay Desktop's own sections, after the TV app's.
+      var dt = d.desktop;
+      if (dt) {
+        var head = document.createElement('h2');
+        head.className = 'stats-heading';
+        head.style.gridColumn = '1 / -1';
+        head.textContent = '桌面端（近 30 天设备 ' + dt.devices30 + '）';
+        grid.appendChild(head);
+        [['app', '桌面端版本'], ['os', '操作系统'], ['session', '显示方式'], ['screen', '最大屏幕'], ['lang', '语言'],
+          ['encoders', '可用的编码器']].forEach(function (s) { grid.appendChild(section(s[1], dt[s[0]] || [])); });
+        [['cast.', '投屏对象'], ['length.', '投屏时长'], ['encoder.', '实际使用的编码器'], ['fps.', '帧率'], ['bitrate.', '码率'],
+          ['sound.', '声音'], ['fail.', '出错'], ['update.', '更新']].forEach(function (g) {
+          grid.appendChild(section(g[1], dt.counts.filter(function (r) { return r.key.indexOf(g[0]) === 0; })));
+        });
+      }
       status.textContent = '更新于 ' + new Date(d.generated).toLocaleString('zh-CN');
     })
     .catch(function (e) {

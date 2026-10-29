@@ -96,6 +96,21 @@ It is kept and read as the TV app's reports are (see above): over HTTPS to this 
 
 Never sent: device names (the TV's or a phone's), song or video titles, links, network or hardware addresses, the Wi-Fi name, your location, exact times of casts, passwords or PINs. The website keeps one row per installation and day in its database (Cloudflare D1) and does not store your network's address; rows are deleted after a year. Only the developer can read them, to see which devices and Android versions to support and where CastBay fails. **Turning the switch off** stops counting, forgets the ID and asks the website to delete everything sent under it.
 
+**CastBay Desktop** has its own switch, **Send anonymous usage statistics** (Settings, off by default, nothing is counted while it is off), with its own random installation ID, made when you turn it on and forgotten, with its counts, when you turn it off (the website is then asked to delete its rows). Once a day it sends:
+
+| Sent | Example |
+| --- | --- |
+| The random installation ID and the day (UTC) | 3f2a…, 2026-10-29 |
+| CastBay Desktop's version | 0.1.4 |
+| The operating system (Windows build number, or Linux distribution and version), processor type, and on Linux whether the session is Wayland or X11 | 10.0.19045; ubuntu 26.04, x86_64, wayland |
+| The class of the biggest screen, and the program's language | 1080p, zh |
+| Which video encoders open on the computer | NVIDIA, CPU |
+| Casts that day: whole screen or one window, how long in three bands, the encoder used, frame rate, bitrate in three bands, sound or not | screen 2, 1–10 minutes 1, NVIDIA 2, 30 fps 2, 6–11 Mbit/s 2, with sound 2 |
+| Failures, by kind, and updates installed from the program | encoder 1, update installed 1 |
+| Settings in use | encoder: automatic; language: automatic; update check on; error reports off |
+
+Never sent: the computer's or receivers' names, window titles or screen contents, network or hardware addresses, your location, exact times or lengths of casts. It goes to this website, or to its relay where Cloudflare can't be reached, and is kept as the TV app's statistics are.
+
 ## The relay (cast.weenas.com)
 
 In some networks (often in mainland China) this website, on Cloudflare, can't be reached. CastBay then sends the same three requests (the update check, problem reports and usage statistics) to cast.weenas.com instead: a relay on the developer's server in the United States that passes them on, over HTTPS and unchanged, to this website, and passes the answer back. It stores nothing and keeps no access log; it answers nothing else. It tells this website your network's address only for the upload limits described above, which don't store it either. What is sent and kept is exactly as described above.

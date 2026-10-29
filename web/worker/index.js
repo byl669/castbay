@@ -58,7 +58,10 @@ export default {
   },
 
   async scheduled(event, env) {
-    await env.STATS.prepare("DELETE FROM daily WHERE day < date('now', '-365 days')").run();
+    await env.STATS.batch([
+      env.STATS.prepare("DELETE FROM daily WHERE day < date('now', '-365 days')"),
+      env.STATS.prepare("DELETE FROM desktop_daily WHERE day < date('now', '-365 days')"),
+    ]);
   },
 };
 
@@ -130,6 +133,7 @@ async function receiveStats(request, env) {
     if (!success) return json({ error: 'too many' }, 429);
   }
   const body = await readJson(request);
+  if (body && body.platform === 'desktop') return receiveDesktopStats(body, env);
   const row = body && validStats(body);
   if (!row) return json({ error: 'invalid' }, 400);
   await env.STATS.prepare(
@@ -143,8 +147,54 @@ async function receiveStats(request, env) {
 async function deleteStats(request, env) {
   const body = await readJson(request);
   if (!body || typeof body.id !== 'string' || !UUID.test(body.id)) return json({ error: 'invalid' }, 400);
-  await env.STATS.prepare('DELETE FROM daily WHERE id = ?').bind(body.id).run();
+  await env.STATS.batch([
+    env.STATS.prepare('DELETE FROM daily WHERE id = ?').bind(body.id),
+    env.STATS.prepare('DELETE FROM desktop_daily WHERE id = ?').bind(body.id),
+  ]);
   return json({ ok: true }, 200);
+}
+
+// What CastBay Desktop may send (desktop/app/src/usage.rs); anything else refuses the whole summary.
+const DESKTOP_COUNTER = /^(cast\.(screen|window)|length\.(under1m|1to10m|over10m)|encoder\.(amf|nvenc|x264)|fps\.(30|60)|bitrate\.(under6|6to11|12plus)|sound\.(on|off)|fail\.(encoder|capture|no_picture|protocol|network|other)|update\.installed)$/;
+const DESKTOP_SETTINGS = ['encoder', 'language', 'updates', 'errorReports'];
+
+async function receiveDesktopStats(body, env) {
+  const row = validDesktopStats(body);
+  if (!row) return json({ error: 'invalid' }, 400);
+  await env.STATS.prepare(
+    `INSERT OR REPLACE INTO desktop_daily (id, day, app, os, os_version, arch, session, screen, lang, encoders, counts, settings, received)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(row.id, row.day, row.app, row.os, row.osVersion, row.arch, row.session, row.screen, row.lang,
+    JSON.stringify(row.encoders), JSON.stringify(row.counts), JSON.stringify(row.settings), new Date().toISOString()).run();
+  return json({ ok: true }, 200);
+}
+
+/** CastBay Desktop's summary with only known fields, each checked; null if anything is off. */
+function validDesktopStats(b) {
+  const text = (v, max, pattern) => typeof v === 'string' && v.length > 0 && v.length <= max && (!pattern || pattern.test(v));
+  const now = Date.now();
+  const day = Date.parse(b.day + 'T00:00:00Z');
+  if (!text(b.id, 36, UUID) || !text(b.day, 10, /^\d{4}-\d{2}-\d{2}$/) || !(day > now - 9 * 86400000 && day < now + 2 * 86400000)) return null;
+  if (!text(b.app, 40, /^\d+(\.\d+){1,3}(-[0-9A-Za-z.]+)?(\+[0-9A-Za-z.]+)?$/)) return null;
+  if (!['windows', 'linux'].includes(b.os) || !text(b.osVersion, 40, /^[A-Za-z0-9._ -]+$/)) return null;
+  if (!['x86_64', 'aarch64'].includes(b.arch) || !['windows', 'wayland', 'x11', 'other'].includes(b.session)) return null;
+  if (!['2160p', '1440p', '1080p', '720p', 'smaller', 'unknown'].includes(b.screen) || !text(b.lang, 8, /^[a-z]{2,3}$/)) return null;
+  if (!Array.isArray(b.encoders) || b.encoders.length > 3 || !b.encoders.every((e) => ['amf', 'nvenc', 'x264'].includes(e))) return null;
+  const counts = {};
+  if (!b.counts || typeof b.counts !== 'object' || Object.keys(b.counts).length > 40) return null;
+  for (const [key, value] of Object.entries(b.counts)) {
+    if (!DESKTOP_COUNTER.test(key) || !Number.isInteger(value) || value < 1 || value > 100000) return null;
+    counts[key] = value;
+  }
+  const settings = {};
+  if (!b.settings || typeof b.settings !== 'object') return null;
+  for (const [key, value] of Object.entries(b.settings)) {
+    if (!DESKTOP_SETTINGS.includes(key)) return null;
+    if (typeof value === 'boolean' || (typeof value === 'string' && /^[A-Za-z0-9_. ]{1,20}$/.test(value))) settings[key] = value;
+    else return null;
+  }
+  return { id: b.id, day: b.day, app: b.app, os: b.os, osVersion: b.osVersion, arch: b.arch, session: b.session,
+    screen: b.screen, lang: b.lang, encoders: b.encoders, counts, settings };
 }
 
 async function readJson(request) {
@@ -249,7 +299,33 @@ async function summary(env) {
     out[name] = name.startsWith('devices') ? rows[0].n : rows;
   });
   out.reports = reports;
+  out.desktop = await desktopSummary(env, since);
   return json(out, 200);
+}
+
+/** CastBay Desktop's totals over the same window (devices counted once each, by their latest day). */
+async function desktopSummary(env, since) {
+  const recent = `SELECT * FROM desktop_daily WHERE day >= ${since}`;
+  const latest = `SELECT d.* FROM desktop_daily d JOIN (SELECT id, max(day) AS day FROM desktop_daily WHERE day >= ${since} GROUP BY id) l
+    ON d.id = l.id AND d.day = l.day`;
+  const by = (column) => `SELECT ${column} AS key, count(*) AS n FROM (${latest}) GROUP BY 1 ORDER BY n DESC LIMIT 30`;
+  const queries = {
+    devices30: `SELECT count(DISTINCT id) AS n FROM desktop_daily WHERE day >= ${since}`,
+    app: by('app'),
+    os: by("os || ' ' || os_version"),
+    session: by('session'),
+    screen: by('screen'),
+    lang: by('lang'),
+    encoders: `SELECT j.value AS key, count(*) AS n FROM (${latest}) l, json_each(l.encoders) j GROUP BY 1 ORDER BY n DESC`,
+    counts: `SELECT j.key AS key, sum(j.value) AS n FROM (${recent}) r, json_each(r.counts) j GROUP BY 1 ORDER BY n DESC`,
+  };
+  const names = Object.keys(queries);
+  const results = await env.STATS.batch(names.map((name) => env.STATS.prepare(queries[name])));
+  const out = {};
+  names.forEach((name, i) => {
+    out[name] = name === 'devices30' ? results[i].results[0].n : results[i].results;
+  });
+  return out;
 }
 
 /** The latest problem reports (R2 keeps them 90 days), newest first, without their text. */
