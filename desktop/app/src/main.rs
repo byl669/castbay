@@ -11,6 +11,7 @@ use std::time::Duration;
 use castbay_sender::{Codec, Options, Status, Stopper, Target};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+mod diagnostics;
 mod settings;
 mod update;
 
@@ -194,7 +195,7 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>, settin
         }
         let _ = emitter.emit("status", status_json(&status));
     });
-    log(&app, &format!("start: {}:{} {} {} {} {}", args.ip, args.port, args.kind, format!("{}fps {}Mbit/s", settings.fps, settings.bitrate_mbps), settings.encoder, args.value));
+    log(&app, &format!("start: {}:{} {} {} {} {}", args.ip, args.port, args.kind, format!("{}fps {}Mbit/s", settings.fps, settings.bitrate_mbps), settings.encoder, if args.kind == "window" { "" } else { args.value.as_str() }));
     let handle = castbay_sender::start(options, on_status, ask);
     *state.stopper.lock().unwrap() = Some(handle.stopper());
 
@@ -308,6 +309,10 @@ fn open_with_system(target: &str) -> Result<(), String> {
 /// tries each, which takes a moment; the answer is kept).
 #[tauri::command]
 async fn encoders() -> Vec<&'static str> {
+    found_encoders().await
+}
+
+async fn found_encoders() -> Vec<&'static str> {
     static FOUND: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
     if let Some(found) = FOUND.get() {
         return found.clone();
@@ -326,6 +331,69 @@ async fn encoders() -> Vec<&'static str> {
     .await
     .unwrap_or_default();
     FOUND.get_or_init(|| found).clone()
+}
+
+/// The person's home folder, to be taken out of what is sent (diagnostics::scrub).
+fn home_dir() -> String {
+    std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default()
+}
+
+/// What the Diagnostics page and the report say about this computer and the settings: labels and
+/// values, no names of receivers, windows or people.
+async fn device_info(app: &AppHandle) -> Vec<(String, String)> {
+    let settings = app.state::<SettingsState>().0.lock().unwrap().clone();
+    let paired = app.path().app_data_dir().map(|d| castbay_link::Pins::load(&d).list().len()).unwrap_or(0);
+    let encoders = found_encoders().await;
+    let sound = if settings.send_audio { "with sound" } else { "no sound" };
+    [
+        ("CastBay Desktop", env!("CARGO_PKG_VERSION").to_string()),
+        ("System", diagnostics::system_line()),
+        ("Architecture", std::env::consts::ARCH.to_string()),
+        ("WebView", tauri::webview_version().unwrap_or_default()),
+        ("Encoders that open here", if encoders.is_empty() { "none".into() } else { encoders.join(", ") }),
+        ("Settings", format!("{} fps, {} Mbit/s, encoder {}, {sound}, language {}", settings.fps, settings.bitrate_mbps, settings.encoder, settings.language)),
+        ("Paired receivers", paired.to_string()),
+    ]
+    .into_iter()
+    .map(|(label, value)| (label.to_string(), value))
+    .collect()
+}
+
+/// The Diagnostics page: this computer's facts and the end of the log (scrubbed, as it would be sent).
+#[tauri::command]
+async fn diagnostics_view(app: AppHandle) -> Result<serde_json::Value, String> {
+    let info = device_info(&app).await;
+    let lines = diagnostics::read_log(&app.path().app_log_dir().map_err(|e| e.to_string())?);
+    let log = diagnostics::scrub(&diagnostics::newest(&lines, 40_000), &home_dir());
+    Ok(json!({"info": info, "log": log}))
+}
+
+/// Uploads a problem report (only ever called from the button on the Diagnostics page, after it
+/// said what is sent): the report's ID, or why it failed.
+#[tauri::command]
+async fn upload_report(app: AppHandle) -> Result<String, String> {
+    let info = device_info(&app).await;
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let mut head = format!("CastBay Desktop problem report, {}\n", utc(secs));
+    for (label, value) in &info {
+        head.push_str(&format!("{label}: {value}\n"));
+    }
+    let lines = diagnostics::read_log(&app.path().app_log_dir().map_err(|e| e.to_string())?);
+    let text = diagnostics::report_text(&head, &lines, &home_dir());
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("report");
+    let result = tauri::async_runtime::spawn_blocking(move || diagnostics::upload(&text, env!("CARGO_PKG_VERSION"), &dir))
+        .await
+        .map_err(|e| e.to_string())?;
+    match result {
+        Ok(id) => {
+            log(&app, &format!("problem report uploaded: {id}"));
+            Ok(id)
+        }
+        Err(refusal) => {
+            log(&app, &format!("problem report not uploaded: {}", refusal.text()));
+            Err(refusal.text())
+        }
+    }
 }
 
 /// Downloads and installs a newer version (see `update`). `Ok("installing")`: Windows is replacing
@@ -607,7 +675,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, set_settings, list_paired, discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, install_update, encoders, autostart_get, autostart_set])
+        .invoke_handler(tauri::generate_handler![get_settings, set_settings, list_paired, discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, install_update, encoders, diagnostics_view, upload_report, autostart_get, autostart_set])
         .run(tauri::generate_context!())
         .expect("the CastBay Desktop window failed to start");
 }

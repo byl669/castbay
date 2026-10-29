@@ -135,9 +135,27 @@
       <div class="list">
         <div class="row"><span><span data-i18n="s_version"></span> <span id="version">–</span></span><span id="update-status" class="muted"></span></div>
         <button id="check-update" class="row link-row"><span data-i18n="s_check_update"></span><svg class="ic small"><use href="#i-refresh"/></svg></button>
+        <button id="open-diagnostics" class="row link-row"><span data-i18n="s_diagnostics"></span><svg class="ic small"><use href="#i-chevron"/></svg></button>
         <button id="logs" class="row link-row"><span data-i18n="s_logs"></span><svg class="ic small"><use href="#i-external"/></svg></button>
         <button id="open-source" class="row link-row"><span data-i18n="s_license"></span><svg class="ic small"><use href="#i-external"/></svg></button>
       </div>
+    </section>
+
+    <section id="view-diagnostics" class="view" hidden>
+      <p class="muted note" data-i18n="diag_intro"></p>
+      <dl id="diag-info" class="facts"></dl>
+      <div class="section-head"><h2 data-i18n="diag_log"></h2></div>
+      <pre id="diag-log" class="logbox" tabindex="0"></pre>
+      <div id="diag-ask" class="notice info" hidden>
+        <svg class="ic"><use href="#i-info"/></svg>
+        <span data-i18n="diag_ask"></span>
+      </div>
+      <div class="diag-actions">
+        <button id="diag-upload" class="btn secondary" data-i18n="diag_upload"></button>
+        <button id="diag-confirm" class="btn primary" hidden data-i18n="diag_confirm"></button>
+        <button id="diag-cancel" class="btn secondary" hidden data-i18n="diag_cancel"></button>
+      </div>
+      <p id="diag-result" class="note" role="status"></p>
     </section>
 
     <section id="view-paired" class="view" hidden>

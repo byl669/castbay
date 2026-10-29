@@ -25,7 +25,7 @@ const TEXT = {
     qn: "码率是上限：网络跟不上时会自动降低，再慢慢回升。码率越高画面越清晰，也越占网络；60 帧让动态画面（游戏、拖动窗口）更跟手，建议同时把码率调到 8 Mbit/s 以上。",
     s_audio: "同时传声音", s_encoder: "编码器", e_auto: "自动（推荐）", e_amf: "显卡加速（AMD）", e_nvenc: "显卡加速（NVIDIA）", e_x264: "CPU 软件编码", e_off: "（这台电脑不可用）", encoder_note: "显卡加速用显卡里专门的视频编码单元，几乎不占 CPU，延迟也更低；CPU 软件编码任何电脑都能用，但会占用 CPU。自动：有可用的显卡加速就用它，没有就用 CPU。选项里只列出这台电脑能用的。",
     s_general: "通用", s_autostart: "开机自动启动", s_language: "语言", lang_auto: "跟随系统", s_paired: "已配对的接收端",
-    s_about: "关于", s_version: "版本", s_check_update: "检查更新", s_logs: "打开日志文件夹", s_license: "开源许可证与源码",
+    s_about: "关于", s_diagnostics: "诊断信息", diag_intro: "出问题时，可以把这里的信息上传，拿到报告编号后告诉开发者，对方就能看到当时发生了什么。只有你点“上传”才会发送。", diag_log: "最近的日志", diag_ask: "将上传：这台电脑的系统和显卡编码器信息、程序的设置（不含名字），以及最近的日志。日志里的网络地址、接收端的名字和用户文件夹路径会先去掉。报告保存 90 天，只有开发者能看到。", diag_upload: "上传日志", diag_confirm: "确认上传", diag_cancel: "取消", diag_sending: "正在上传…", diag_done: "已上传。报告编号：{0}（请把它告诉开发者）", diag_failed: "上传失败：{0}", diag_too_many: "短时间内上传太多次了，请稍后再试。", s_version: "版本", s_check_update: "检查更新", s_logs: "打开日志文件夹", s_license: "开源许可证与源码",
     up_checking: "正在检查…", up_latest: "已是最新", up_new: "有新版本 {0}", up_failed: "检查失败", up_dev: "开发版",
     paired_intro: "这些接收端配对过。忘记后，下次投屏需要重新配对。", paired_none: "还没有配对过的接收端。", unnamed: "未命名的接收端",
     last_seen: "上次连接 {0}", forget: "忘记", forget_sure: "确认忘记", forget_receiver: "忘记这个接收端",
@@ -61,7 +61,7 @@ const TEXT = {
     qn: "The bitrate is a ceiling: when the network cannot keep up it is lowered by itself and creeps back up. A higher bitrate means a sharper picture and more network use; 60 fps makes motion (games, dragging windows) follow more closely, and wants 8 Mbit/s or more.",
     s_audio: "Send sound too", s_encoder: "Encoder", e_auto: "Automatic (recommended)", e_amf: "Graphics card (AMD)", e_nvenc: "Graphics card (NVIDIA)", e_x264: "CPU (software)", e_off: " (not available on this computer)", encoder_note: "A graphics card encodes with its own video unit: it hardly uses the CPU and adds less delay. The CPU can do it on any computer but is busier. Automatic uses a graphics card when one works, else the CPU. Only what works on this computer is listed.",
     s_general: "General", s_autostart: "Start with Windows", s_language: "Language", lang_auto: "Follow the system", s_paired: "Paired receivers",
-    s_about: "About", s_version: "Version", s_check_update: "Check for updates", s_logs: "Open log folder", s_license: "Licence and source code",
+    s_about: "About", s_diagnostics: "Diagnostics", diag_intro: "When something goes wrong, you can upload what is shown here and give the developer the report ID, so they can see what happened. Nothing is sent unless you press Upload.", diag_log: "Recent log", diag_ask: "What is sent: this computer's system and encoder information, the program's settings (no names), and its recent log. Network addresses, receivers' names and your user folder in paths are taken out first. The report is kept for 90 days and only the developer can read it.", diag_upload: "Upload log", diag_confirm: "Send it", diag_cancel: "Cancel", diag_sending: "Uploading…", diag_done: "Uploaded. Report ID: {0} (give it to the developer)", diag_failed: "The upload failed: {0}", diag_too_many: "Too many uploads in a row; try again later.", s_version: "Version", s_check_update: "Check for updates", s_logs: "Open log folder", s_license: "Licence and source code",
     up_checking: "Checking…", up_latest: "Up to date", up_new: "Version {0} is available", up_failed: "Could not check", up_dev: "Development build",
     paired_intro: "These receivers were paired. After forgetting one, the next cast pairs again.", paired_none: "No receiver has been paired yet.", unnamed: "Unnamed receiver",
     last_seen: "Last connected {0}", forget: "Forget", forget_sure: "Forget it", forget_receiver: "Forget this receiver",
@@ -159,11 +159,11 @@ function nudge(message) {
 }
 
 // ---------------------------------------------------------------- views
-const TITLES = { home: null, casting: null, settings: "settings", paired: "s_paired" };
+const TITLES = { home: null, casting: null, settings: "settings", paired: "s_paired", diagnostics: "s_diagnostics" };
 function showView(name) {
   view = name;
-  for (const v of ["home", "casting", "settings", "paired"]) $("view-" + v).hidden = v !== name;
-  const sub = name === "settings" || name === "paired";
+  for (const v of ["home", "casting", "settings", "paired", "diagnostics"]) $("view-" + v).hidden = v !== name;
+  const sub = name === "settings" || name === "paired" || name === "diagnostics";
   $("back").hidden = !sub;
   $("open-settings").hidden = sub;
   $("title").firstElementChild.toggleAttribute("hidden", sub); // an SVG has no .hidden property
@@ -179,7 +179,7 @@ function showView(name) {
 }
 
 function goBack() {
-  if (view === "paired") { showView("settings"); return; }
+  if (view === "paired" || view === "diagnostics") { showView("settings"); return; }
   showView(casting ? "casting" : "home");
 }
 
@@ -437,11 +437,44 @@ function showUpdateResult(result, loud) {
   }
 }
 
+// ---------------------------------------------------------------- diagnostics
+// Facts about this computer and the end of the log, as they would be sent. Uploading asks first,
+// with the page saying what is sent; a failure says why, a success gives the report's ID.
+function setDiagnosticsAsk(asking) {
+  $("diag-ask").hidden = !asking;
+  $("diag-confirm").hidden = !asking;
+  $("diag-cancel").hidden = !asking;
+  $("diag-upload").hidden = asking;
+}
+
+async function openDiagnostics() {
+  $("diag-result").textContent = "";
+  setDiagnosticsAsk(false);
+  $("diag-info").replaceChildren();
+  $("diag-log").textContent = "…";
+  showView("diagnostics");
+  try {
+    const data = await invoke("diagnostics_view");
+    $("diag-info").replaceChildren(...data.info.flatMap(([label, value]) => [el("dt", { text: label }), el("dd", { text: value })]));
+    $("diag-log").textContent = data.log || "–";
+    $("diag-log").scrollTop = $("diag-log").scrollHeight;
+  } catch (e) { $("diag-log").textContent = String(e); }
+}
+
+async function uploadReport() {
+  setDiagnosticsAsk(false);
+  $("diag-upload").disabled = true;
+  $("diag-result").textContent = t("diag_sending");
+  try { $("diag-result").textContent = t("diag_done", await invoke("upload_report")); }
+  catch (e) { $("diag-result").textContent = e === "too many" ? t("diag_too_many") : t("diag_failed", String(e)); }
+  $("diag-upload").disabled = false;
+}
+
 // ---------------------------------------------------------------- wiring
 function wire() {
   $("open-settings").addEventListener("click", () => { renderSettings(); showView("settings"); });
   $("back").addEventListener("click", goBack);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && (view === "settings" || view === "paired")) goBack(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && (view === "settings" || view === "paired" || view === "diagnostics")) goBack(); });
   $("refresh").addEventListener("click", refreshReceivers);
   $("empty-retry").addEventListener("click", refreshReceivers);
   $("welcome-ok").addEventListener("click", () => { $("welcome").hidden = true; save({ welcome_done: true }); });
@@ -476,6 +509,10 @@ function wire() {
     try { await invoke("autostart_set", { on }); $("autostart").setAttribute("aria-checked", String(on)); }
     catch (e) { showError(String(e)); }
   });
+  $("open-diagnostics").addEventListener("click", openDiagnostics);
+  $("diag-upload").addEventListener("click", () => setDiagnosticsAsk(true));
+  $("diag-cancel").addEventListener("click", () => setDiagnosticsAsk(false));
+  $("diag-confirm").addEventListener("click", uploadReport);
   $("open-paired").addEventListener("click", async () => { await renderPaired(); showView("paired"); });
   $("check-update").addEventListener("click", async () => { $("update-status").textContent = t("up_checking"); showUpdateResult(await checkUpdate(), true); });
   $("logs").addEventListener("click", () => invoke("open_logs").catch((e) => showError(String(e))));
