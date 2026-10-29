@@ -104,10 +104,14 @@
 
     <section id="view-settings" class="view" hidden>
       <div class="section-head"><h2 data-i18n="s_quality"></h2></div>
-      <div class="segmented" role="radiogroup" data-aria="s_quality">
-        <button type="button" role="radio" data-quality="saver"><span data-i18n="q_saver"></span></button>
-        <button type="button" role="radio" data-quality="balanced"><span data-i18n="q_balanced"></span></button>
-        <button type="button" role="radio" data-quality="smooth"><span data-i18n="q_smooth"></span></button>
+      <div class="list">
+        <label class="row slider-row"><span data-i18n="s_bitrate"></span><span class="slider"><input id="bitrate" type="range" min="2" max="20" step="1" data-aria="s_bitrate"><span id="bitrate-ticks" class="ticks" aria-hidden="true"></span></span><output id="bitrate-value"></output></label>
+        <div class="row"><span data-i18n="s_fps"></span>
+          <div class="segmented fps" role="radiogroup" data-aria="s_fps">
+            <button type="button" role="radio" data-fps="30"><span data-i18n="fps_30"></span></button>
+            <button type="button" role="radio" data-fps="60"><span data-i18n="fps_60"></span></button>
+          </div>
+        </div>
       </div>
       <p id="quality-note" class="muted note"></p>
       <div class="list">

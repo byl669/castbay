@@ -7,7 +7,7 @@ const TEXT = {
   zh: {
     app_name: "映湾桌面端", settings: "设置", download: "下载", update_now: "更新", update_notes: "更新内容", got_it: "知道了", ok: "确定", search_again: "重新查找",
     aria_back: "返回", aria_settings: "设置", aria_refresh: "刷新", aria_what: "投什么", aria_source: "选择要投的内容", aria_code: "配对码",
-    aria_s_quality: "画质", aria_s_audio: "同时传声音", aria_s_autostart: "开机自动启动",
+    aria_s_quality: "画质", aria_s_bitrate: "码率", aria_s_fps: "帧率", aria_s_audio: "同时传声音", aria_s_autostart: "开机自动启动",
     w_title: "开始使用", w_1: "在电视或平板上打开映湾，在设置里开启“电脑投屏”。",
     w_2: "如果 Windows 防火墙弹窗询问，请允许在专用网络上访问，否则找不到接收端。",
     w_3: "在下面选择接收端并开始投屏。第一次连接时接收端会显示 6 位配对码，在这里输入即可。",
@@ -21,8 +21,8 @@ const TEXT = {
     code_prompt: "请输入接收端屏幕上显示的 6 位配对码。", locked_note: "电脑已锁屏：Windows 在锁屏时不提供画面，所以画面会停住。解锁后会自动继续。",
     details: "详细信息", s_decode: "接收端解码", s_fps: "接收端帧率", s_dropped: "丢帧", s_rate: "码率", tray_hint: "投屏时关闭窗口，投屏会继续在系统托盘里运行。",
     fps_n: "{0} 帧",
-    s_quality: "画质", q_saver: "低码率", q_balanced: "均衡", q_smooth: "高帧率",
-    qn_saver: "30 帧 · 4 Mbit/s：占用网络最少，画面细节少一些。", qn_balanced: "30 帧 · 8 Mbit/s：大多数场景够用。", qn_smooth: "60 帧 · 10 Mbit/s：动态画面（游戏、拖动窗口）更跟手，占用更多网络和 CPU；静态画面的清晰度和「均衡」差不多。",
+    s_quality: "画质", s_bitrate: "码率", s_fps: "帧率", fps_30: "30 帧", fps_60: "60 帧",
+    qn: "码率是上限：网络跟不上时会自动降低，再慢慢回升。码率越高画面越清晰，也越占网络；60 帧让动态画面（游戏、拖动窗口）更跟手，建议同时把码率调到 8 Mbit/s 以上。",
     s_audio: "同时传声音", s_encoder: "编码器", e_auto: "自动", e_cpu: "CPU（x264）", encoder_note: "自动会依次尝试 AMD、NVIDIA，最后用 CPU。",
     s_general: "通用", s_autostart: "开机自动启动", s_language: "语言", lang_auto: "跟随系统", s_paired: "已配对的接收端",
     s_about: "关于", s_version: "版本", s_check_update: "检查更新", s_logs: "打开日志文件夹", s_license: "开源许可证与源码",
@@ -43,7 +43,7 @@ const TEXT = {
   en: {
     app_name: "CastBay Desktop", settings: "Settings", download: "Download", update_now: "Update", update_notes: "What's new", got_it: "Got it", ok: "OK", search_again: "Search again",
     aria_back: "Back", aria_settings: "Settings", aria_refresh: "Refresh", aria_what: "What to cast", aria_source: "Choose what to cast", aria_code: "Pairing code",
-    aria_s_quality: "Quality", aria_s_audio: "Send sound too", aria_s_autostart: "Start with Windows",
+    aria_s_quality: "Quality", aria_s_bitrate: "Bitrate", aria_s_fps: "Frame rate", aria_s_audio: "Send sound too", aria_s_autostart: "Start with Windows",
     w_title: "Getting started", w_1: "On the TV or tablet, open CastBay and turn on \"Desktop casting\" in its settings.",
     w_2: "If Windows asks about the firewall, allow access on private networks. Otherwise receivers cannot be found.",
     w_3: "Pick the receiver below and start. The first time, the receiver shows a 6-digit code: type it here.",
@@ -57,8 +57,8 @@ const TEXT = {
     code_prompt: "Type the 6-digit code shown on the receiver.", locked_note: "The PC is locked: Windows shows nothing to capture, so the picture stays as it was. Unlock it to go on.",
     details: "Details", s_decode: "Receiver decode", s_fps: "Receiver fps", s_dropped: "Dropped", s_rate: "Bitrate", tray_hint: "Closing the window while casting keeps the cast running in the tray.",
     fps_n: "{0} fps",
-    s_quality: "Quality", q_saver: "Low bitrate", q_balanced: "Balanced", q_smooth: "High FPS",
-    qn_saver: "30 fps, 4 Mbit/s: the least network, less detail.", qn_balanced: "30 fps, 8 Mbit/s: enough for most things.", qn_smooth: "60 fps, 10 Mbit/s: motion (games, dragging windows) follows more closely, with more network and CPU; still pictures look about as sharp as Balanced.",
+    s_quality: "Quality", s_bitrate: "Bitrate", s_fps: "Frame rate", fps_30: "30 fps", fps_60: "60 fps",
+    qn: "The bitrate is a ceiling: when the network cannot keep up it is lowered by itself and creeps back up. A higher bitrate means a sharper picture and more network use; 60 fps makes motion (games, dragging windows) follow more closely, and wants 8 Mbit/s or more.",
     s_audio: "Send sound too", s_encoder: "Encoder", e_auto: "Automatic", e_cpu: "CPU (x264)", encoder_note: "Automatic tries AMD, then NVIDIA, then the CPU.",
     s_general: "General", s_autostart: "Start with Windows", s_language: "Language", lang_auto: "Follow the system", s_paired: "Paired receivers",
     s_about: "About", s_version: "Version", s_check_update: "Check for updates", s_logs: "Open log folder", s_license: "Licence and source code",
@@ -245,14 +245,13 @@ async function refreshSources() {
   catch (e) { showError(String(e)); }
 }
 
-function qualityName() { return t("q_" + (settings.quality || "balanced")); }
 
 function renderSummary() {
   if (view !== "home") return;
   const box = $("action-summary");
   clearTimeout(toastTimer);
   box.replaceChildren(
-    document.createTextNode([qualityName(), t("fps_n", settings.quality === "smooth" ? 60 : 30), t(settings.send_audio ? "with_audio" : "no_audio")].join(" · ") + " · "),
+    document.createTextNode([`${settings.bitrate_mbps} Mbit/s`, t("fps_n", settings.fps), t(settings.send_audio ? "with_audio" : "no_audio")].join(" · ") + " · "),
     el("button", { class: "link", text: t("change"), onclick: () => showView("settings") }));
 }
 
@@ -263,7 +262,7 @@ function startCast() {
   const value = $("source").value;
   if (kind === "window" && !value) { nudge(t("pick_source")); return; }
   showError("");
-  castNote = { fps: settings.quality === "smooth" ? 60 : 30, audio: !!settings.send_audio };
+  castNote = { fps: settings.fps, audio: !!settings.send_audio };
   invoke("start_cast", { args: { id: selected.id, ip: selected.ip, port: selected.port, password: selected.password ? $("password").value : null, kind, value } })
     .then(() => { casting = true; resetCasting(); showView("casting"); })
     .catch((e) => showError(t("failed", String(e))));
@@ -325,8 +324,10 @@ function endCast() {
 
 // ---------------------------------------------------------------- settings page
 function renderSettings() {
-  document.querySelectorAll("#view-settings .segmented button").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.quality === settings.quality)));
-  $("quality-note").textContent = t("qn_" + settings.quality);
+  document.querySelectorAll("#view-settings .fps button").forEach((b) => b.setAttribute("aria-checked", String(Number(b.dataset.fps) === settings.fps)));
+  $("bitrate").value = settings.bitrate_mbps;
+  $("bitrate-value").textContent = `${settings.bitrate_mbps} Mbit/s`;
+  $("quality-note").textContent = t("qn");
   $("audio").setAttribute("aria-checked", String(!!settings.send_audio));
   $("encoder").value = settings.encoder;
   $("language").value = settings.language;
@@ -436,7 +437,12 @@ function wire() {
   document.querySelectorAll("#view-home .segmented button").forEach((b) => b.addEventListener("click", () => { save({ source_kind: b.dataset.kind }); fillSources(); refreshSources(); }));
   $("source").addEventListener("change", () => save(currentKind() === "monitor" ? { source_monitor: $("source").value } : { source_window: $("source").value }));
 
-  document.querySelectorAll("#view-settings .segmented button").forEach((b) => b.addEventListener("click", async () => { await save({ quality: b.dataset.quality }); renderSettings(); }));
+  document.querySelectorAll("#view-settings .fps button").forEach((b) => b.addEventListener("click", async () => { await save({ fps: Number(b.dataset.fps) }); renderSettings(); }));
+  const slider = $("bitrate"), ticks = $("bitrate-ticks");
+  for (let v = Number(slider.min); v <= Number(slider.max); v += Number(slider.step)) ticks.append(document.createElement("i"));
+  // The number follows the slider as it moves; the choice is saved when it is let go.
+  $("bitrate").addEventListener("input", () => { $("bitrate-value").textContent = `${$("bitrate").value} Mbit/s`; });
+  $("bitrate").addEventListener("change", async () => { await save({ bitrate_mbps: Number($("bitrate").value) }); renderSettings(); renderSummary(); });
   $("audio").addEventListener("click", async () => { await save({ send_audio: !settings.send_audio }); renderSettings(); });
   $("encoder").addEventListener("change", () => save({ encoder: $("encoder").value }));
   $("language").addEventListener("change", async () => {

@@ -9,8 +9,10 @@ use serde_json::Value;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Settings {
-    /// `saver`, `balanced` or `smooth`.
-    pub quality: String,
+    /// The most the picture may use, in Mbit/s ([`BITRATE_MBPS`]); a poor connection lowers it.
+    pub bitrate_mbps: u32,
+    /// Pictures per second: 30 or 60.
+    pub fps: u32,
     pub send_audio: bool,
     /// `auto`, `amf`, `nvenc` or `x264`.
     pub encoder: String,
@@ -31,7 +33,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Settings {
         Settings {
-            quality: "balanced".into(),
+            bitrate_mbps: 8,
+            fps: 30,
             send_audio: true,
             encoder: "auto".into(),
             language: "auto".into(),
@@ -45,7 +48,9 @@ impl Default for Settings {
     }
 }
 
-const QUALITIES: [&str; 3] = ["saver", "balanced", "smooth"];
+/// What the slider offers (a version before 0.1.4 had three fixed qualities: 4, 8 and 10 Mbit/s).
+pub const BITRATE_MBPS: std::ops::RangeInclusive<u32> = 2..=20;
+const FPS: [u32; 2] = [30, 60];
 const ENCODERS: [&str; 4] = ["auto", "amf", "nvenc", "x264"];
 const LANGUAGES: [&str; 3] = ["auto", "zh", "en"];
 const KINDS: [&str; 2] = ["monitor", "window"];
@@ -53,7 +58,24 @@ const KINDS: [&str; 2] = ["monitor", "window"];
 impl Settings {
     /// What is saved; defaults for a missing, unreadable or damaged file (and for fields it lacks).
     pub fn load(dir: &Path) -> Settings {
-        std::fs::read(dir.join("settings.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        let Some(value) = std::fs::read(dir.join("settings.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else {
+            return Settings::default();
+        };
+        let mut settings: Settings = serde_json::from_value(value.clone()).unwrap_or_default();
+        // A file from before the two settings: its quality becomes what that quality meant.
+        if value.get("bitrate_mbps").is_none() && value.get("fps").is_none() {
+            if let Some(quality) = value["quality"].as_str() {
+                settings.use_quality(quality);
+            }
+        }
+        // A value out of range (a hand-edited file) is as good as none.
+        if !BITRATE_MBPS.contains(&settings.bitrate_mbps) {
+            settings.bitrate_mbps = Settings::default().bitrate_mbps;
+        }
+        if !FPS.contains(&settings.fps) {
+            settings.fps = Settings::default().fps;
+        }
+        settings
     }
 
     /// Writes the file whole or not at all (a crash in the middle leaves the old one).
@@ -73,7 +95,13 @@ impl Settings {
         let mut next = self.clone();
         for (key, value) in object {
             match key.as_str() {
-                "quality" => next.quality = choice(value, &QUALITIES, key)?,
+                "bitrate_mbps" => next.bitrate_mbps = number(value, BITRATE_MBPS, key)?,
+                "fps" => next.fps = number(value, 30..=60, key).and_then(|n| if FPS.contains(&n) { Ok(n) } else { Err(format!("{key}: 30 or 60")) })?,
+                // What the page kept in its own storage before settings.json (three fixed qualities).
+                "quality" => match value.as_str() {
+                    Some(q @ ("saver" | "balanced" | "smooth")) => next.use_quality(q),
+                    _ => return Err(format!("{key}: not one of saver, balanced, smooth")),
+                },
                 "encoder" => next.encoder = choice(value, &ENCODERS, key)?,
                 "language" => next.language = choice(value, &LANGUAGES, key)?,
                 "source_kind" => next.source_kind = choice(value, &KINDS, key)?,
@@ -90,13 +118,18 @@ impl Settings {
         Ok(())
     }
 
-    /// Pictures per second and bits per second for the chosen quality.
+    /// What the three fixed qualities of earlier versions meant.
+    fn use_quality(&mut self, quality: &str) {
+        (self.fps, self.bitrate_mbps) = match quality {
+            "smooth" => (60, 10),
+            "saver" => (30, 4),
+            _ => (30, 8),
+        };
+    }
+
+    /// Pictures per second and bits per second to cast with.
     pub fn quality_params(&self) -> (u32, u32) {
-        match self.quality.as_str() {
-            "smooth" => (60, 10_000_000),
-            "saver" => (30, 4_000_000),
-            _ => (30, 8_000_000),
-        }
+        (self.fps, self.bitrate_mbps * 1_000_000)
     }
 
     /// Whether the interface (and the tray) should speak Chinese given what the system speaks.
@@ -113,6 +146,13 @@ fn choice(value: &Value, allowed: &[&str], key: &str) -> Result<String, String> 
     match value.as_str() {
         Some(s) if allowed.contains(&s) => Ok(s.to_string()),
         _ => Err(format!("{key}: not one of {}", allowed.join(", "))),
+    }
+}
+
+fn number(value: &Value, allowed: std::ops::RangeInclusive<u32>, key: &str) -> Result<u32, String> {
+    match value.as_u64() {
+        Some(n) if allowed.contains(&(n as u32)) && n <= u32::MAX as u64 => Ok(n as u32),
+        _ => Err(format!("{key}: a whole number from {} to {}", allowed.start(), allowed.end())),
     }
 }
 
@@ -142,7 +182,7 @@ mod tests {
     fn a_new_install_gets_the_defaults() {
         let s = Settings::load(&temp("none"));
         assert_eq!(s, Settings::default());
-        assert_eq!((s.quality.as_str(), s.send_audio, s.encoder.as_str()), ("balanced", true, "auto"));
+        assert_eq!((s.send_audio, s.encoder.as_str()), (true, "auto"));
         assert_eq!(s.quality_params(), (30, 8_000_000));
     }
 
@@ -150,22 +190,25 @@ mod tests {
     fn settings_survive_a_restart() {
         let dir = temp("roundtrip");
         let mut s = Settings::default();
-        s.apply(&json!({"quality": "smooth", "send_audio": false, "last_receiver": "tv-1", "source_window": "Notes"})).unwrap();
+        s.apply(&json!({"fps": 60, "bitrate_mbps": 12, "send_audio": false, "last_receiver": "tv-1", "source_window": "Notes"})).unwrap();
         s.save(&dir).unwrap();
         let again = Settings::load(&dir);
         assert_eq!(again, s);
-        assert_eq!(again.quality_params(), (60, 10_000_000));
+        assert_eq!(again.quality_params(), (60, 12_000_000));
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn a_bad_value_changes_nothing() {
         let mut s = Settings::default();
-        assert!(s.apply(&json!({"quality": "smooth", "encoder": "magic"})).is_err());
+        assert!(s.apply(&json!({"fps": 60, "encoder": "magic"})).is_err());
+        for bad in [json!({"fps": 45}), json!({"fps": "60"}), json!({"bitrate_mbps": 1}), json!({"bitrate_mbps": 21}), json!({"bitrate_mbps": 7.5}), json!({"bitrate_mbps": -3}), json!({"quality": "best"})] {
+            assert!(s.apply(&bad).is_err(), "{bad}");
+        }
         assert_eq!(s, Settings::default());
         assert!(s.apply(&json!({"send_audio": "yes"})).is_err());
         assert!(s.apply(&json!({"last_receiver": "x".repeat(600)})).is_err());
-        assert!(s.apply(&json!("quality")).is_err());
+        assert!(s.apply(&json!("fps")).is_err());
         assert_eq!(s, Settings::default());
     }
 
@@ -174,7 +217,7 @@ mod tests {
         let mut s = Settings::default();
         s.apply(&json!({"language": "zh", "from_the_future": 1})).unwrap();
         assert_eq!(s.language, "zh");
-        assert_eq!(s.quality, "balanced");
+        assert_eq!((s.fps, s.bitrate_mbps), (30, 8));
     }
 
     #[test]
@@ -184,9 +227,30 @@ mod tests {
         std::fs::write(dir.join("settings.json"), b"{ broken").unwrap();
         assert_eq!(Settings::load(&dir), Settings::default());
         // A file from a version with fewer fields keeps what it has.
-        std::fs::write(dir.join("settings.json"), br#"{"quality": "saver"}"#).unwrap();
+        std::fs::write(dir.join("settings.json"), br#"{"language": "en"}"#).unwrap();
         let s = Settings::load(&dir);
-        assert_eq!((s.quality.as_str(), s.send_audio), ("saver", true));
+        assert_eq!((s.language.as_str(), s.send_audio, s.quality_params()), ("en", true, (30, 8_000_000)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_three_qualities_of_earlier_versions_become_a_rate_and_a_bitrate() {
+        let dir = temp("qualities");
+        std::fs::create_dir_all(&dir).unwrap();
+        for (quality, expected) in [("saver", (30, 4_000_000)), ("balanced", (30, 8_000_000)), ("smooth", (60, 10_000_000)), ("unheard-of", (30, 8_000_000))] {
+            std::fs::write(dir.join("settings.json"), format!(r#"{{"quality": "{quality}"}}"#)).unwrap();
+            assert_eq!(Settings::load(&dir).quality_params(), expected, "{quality}");
+        }
+        // Once the two settings exist the old one is not looked at again.
+        std::fs::write(dir.join("settings.json"), br#"{"quality": "smooth", "bitrate_mbps": 6, "fps": 30}"#).unwrap();
+        assert_eq!(Settings::load(&dir).quality_params(), (30, 6_000_000));
+        // A hand-edited value out of range falls back to the default.
+        std::fs::write(dir.join("settings.json"), br#"{"bitrate_mbps": 500, "fps": 144}"#).unwrap();
+        assert_eq!(Settings::load(&dir).quality_params(), (30, 8_000_000));
+        // The page's old storage can still hand over a quality.
+        let mut s = Settings::default();
+        s.apply(&json!({"quality": "smooth"})).unwrap();
+        assert_eq!(s.quality_params(), (60, 10_000_000));
         let _ = std::fs::remove_dir_all(dir);
     }
 

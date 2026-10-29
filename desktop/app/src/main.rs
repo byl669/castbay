@@ -194,7 +194,7 @@ fn start_cast(args: StartArgs, app: AppHandle, state: State<'_, Casting>, settin
         }
         let _ = emitter.emit("status", status_json(&status));
     });
-    log(&app, &format!("start: {}:{} {} {} {} {}", args.ip, args.port, args.kind, settings.quality, settings.encoder, args.value));
+    log(&app, &format!("start: {}:{} {} {} {} {}", args.ip, args.port, args.kind, format!("{}fps {}Mbit/s", settings.fps, settings.bitrate_mbps), settings.encoder, args.value));
     let handle = castbay_sender::start(options, on_status, ask);
     *state.stopper.lock().unwrap() = Some(handle.stopper());
 

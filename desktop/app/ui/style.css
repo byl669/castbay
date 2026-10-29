@@ -62,6 +62,14 @@ input[type=password], input#code, .select { width: 100%; padding: 9px 10px; bord
 .select option { background: var(--card); color: var(--text); }
 .select.inline { width: auto; max-width: 55%; padding: 6px 8px; }
 .select { margin-top: 8px; }
+.slider-row { gap: 14px; }
+.slider { position: relative; flex: 1; min-width: 80px; display: flex; align-items: center; }
+.slider input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
+/* One small mark for each value the slider stops at, in line with where its knob sits (the knob is about 16px wide). */
+.ticks { position: absolute; left: 8px; right: 8px; bottom: -3px; height: 4px; display: flex; justify-content: space-between; pointer-events: none; }
+.ticks i { width: 1px; height: 100%; background: var(--line-strong); }
+.slider-row output { min-width: 72px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.segmented.fps { width: 150px; }
 .segmented { display: flex; border: 1px solid var(--line-strong); border-radius: var(--r-sm); overflow: hidden; background: var(--card); }
 .segmented button { flex: 1; padding: 8px 6px; border: 0; background: transparent; color: var(--muted); }
 .segmented button + button { border-left: 1px solid var(--line-strong); }
