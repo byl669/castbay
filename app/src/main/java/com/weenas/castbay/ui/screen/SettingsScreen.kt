@@ -20,7 +20,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import com.weenas.castbay.service.ReceiverSettings
+import com.weenas.castbay.service.ScreenLauncher
 import androidx.compose.ui.res.stringResource
 import com.weenas.castbay.BuildConfig
 import com.weenas.castbay.R
@@ -264,6 +268,21 @@ private fun ColumnScope.PlaybackPage(settings: ReceiverSettings, viewModel: AirP
         viewModel.updateSettings { it.copy(showLyrics = enabled) }
     }
     Text(stringResource(R.string.setting_lyrics_note), color = Color.Gray, fontSize = 14.sp)
+    CardDivider()
+    val context = LocalContext.current
+    SwitchSetting(stringResource(R.string.setting_open_on_cast), settings.openOnCast) { enabled ->
+        viewModel.updateSettings { it.copy(openOnCast = enabled) }
+        // Android lets an app open its screen from the background only with "Display over other apps".
+        if (enabled && !ScreenLauncher.allowed(context)) {
+            try {
+                context.startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            } catch (_: Exception) { }
+        }
+    }
+    Text(stringResource(R.string.setting_open_on_cast_note), color = Color.Gray, fontSize = 14.sp)
     CardDivider()
     ChoiceSetting(stringResource(R.string.setting_picture), settings.pictureMode, ReceiverSettings.PICTURE_MODES) {
         viewModel.updateSettings { current -> current.copy(pictureMode = it) }

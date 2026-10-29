@@ -370,10 +370,17 @@ class AirPlayManager private constructor(private val context: Context) {
 
     private val _stateCallbacks = mutableListOf<(AirPlayConnectionState, StreamInfo, String?) -> Unit>()
 
+    /** A picture (mirroring, video) was on when the state last changed. */
+    private var pictureOn = false
+
     private var currentState: AirPlayConnectionState = AirPlayConnectionState.Idle
         set(value) {
             val was = field
             field = value
+            // A picture starting while the app is not on screen: bring the screen up.
+            val picture = value == AirPlayConnectionState.Streaming && currentStreamInfo.let { it.isMirroring || it.isVideoPlayback }
+            if (picture && !pictureOn && settingsStore.load().openOnCast) mainHandler.post { ScreenLauncher.show(context) }
+            pictureOn = picture
             // Usage statistics (counted only if the person turned them on).
             if (value == AirPlayConnectionState.Streaming && was != AirPlayConnectionState.Streaming) {
                 val stream = currentStreamInfo

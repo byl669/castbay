@@ -37,6 +37,8 @@ data class ReceiverSettings(
     val pictureMode: String = PICTURE_FIT,
     /** Look up and show synced lyrics for AirPlay music (sends the song's title to lrclib.net). */
     val showLyrics: Boolean = false,
+    /** Open the app's screen when a picture starts while it is not on screen (needs "Display over other apps"). */
+    val openOnCast: Boolean = false,
     /** The app's language: [LANGUAGE_SYSTEM] (the TV's), [LANGUAGE_ZH] or [LANGUAGE_EN]. */
     val language: String = LANGUAGE_SYSTEM,
     /** Look for a newer CastBay on GitHub once a day (UpdateChecker). */
@@ -85,7 +87,7 @@ data class ReceiverSettings(
         withoutLiveSettings() != previous.withoutLiveSettings()
 
     private fun withoutLiveSettings() = copy(
-        showStats = false, pictureMode = PICTURE_FIT, showLyrics = false, language = LANGUAGE_SYSTEM, checkUpdates = true, testVersions = false,
+        showStats = false, pictureMode = PICTURE_FIT, showLyrics = false, openOnCast = false, language = LANGUAGE_SYSTEM, checkUpdates = true, testVersions = false,
         sendErrorReports = false, screenSaver = SCREEN_SAVER_BURN_IN
     )
 
@@ -164,6 +166,7 @@ class ReceiverSettingsStore(context: Context) {
         pictureMode = preferences.getString("picture_mode", null)
             ?.takeIf { it in ReceiverSettings.PICTURE_MODES } ?: ReceiverSettings.PICTURE_FIT,
         showLyrics = preferences.getBoolean("show_lyrics", false),
+        openOnCast = preferences.getBoolean("open_on_cast", false),
         language = preferences.getString("language", null)
             ?.takeIf { it in ReceiverSettings.LANGUAGES } ?: ReceiverSettings.LANGUAGE_SYSTEM,
         checkUpdates = preferences.getBoolean("check_updates", true),
@@ -198,6 +201,7 @@ class ReceiverSettingsStore(context: Context) {
             .putBoolean("show_stats", settings.showStats)
             .putString("picture_mode", settings.pictureMode)
             .putBoolean("show_lyrics", settings.showLyrics)
+            .putBoolean("open_on_cast", settings.openOnCast)
             .putString("language", settings.language)
             .putBoolean("check_updates", settings.checkUpdates)
             .putBoolean("test_versions", settings.testVersions)

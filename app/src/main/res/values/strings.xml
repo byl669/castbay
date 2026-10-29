@@ -127,6 +127,9 @@
     <string name="setting_picture">Picture</string>
     <string name="setting_lyrics">Show lyrics for music</string>
     <string name="setting_lyrics_note">Looks up lyrics on lrclib.net by the song\'s title and artist.</string>
+    <string name="setting_open_on_cast">Open When Casting</string>
+    <string name="setting_open_on_cast_note">Opens CastBay when a device starts mirroring or playing a video while another app or the home screen is showing. Needs "Display over other apps" for CastBay (this opens its settings page). If your TV has no such page, a computer can grant it: adb shell appops set com.weenas.castbay SYSTEM_ALERT_WINDOW allow</string>
+    <string name="open_on_cast_toast">Open CastBay on the TV to see the cast</string>
     <string name="setting_append_tv_name">Add the TV\'s name after it</string>
     <string name="setting_append_tv_name_note">Phones see: %1$s</string>
     <string name="frame_rate_fps">%1$d FPS</string>

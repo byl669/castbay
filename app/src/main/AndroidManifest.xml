@@ -17,6 +17,9 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Only so the screen can open by itself when a cast starts while the app is not showing
+         (Open When Casting, off by default); Android lets a background app do that only with it. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- REQUEST_INSTALL_PACKAGES, for the in-app updater, is in src/selfUpdate/AndroidManifest.xml. -->
     <!--
         The receiver runs as a foreground service so casting survives the Home key: media playback,

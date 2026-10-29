@@ -129,6 +129,9 @@
     <string name="setting_picture">画面</string>
     <string name="setting_lyrics">播放音乐时显示歌词</string>
     <string name="setting_lyrics_note">会把歌名和歌手发送到 lrclib.net 查询歌词。</string>
+    <string name="setting_open_on_cast">投屏时自动打开</string>
+    <string name="setting_open_on_cast_note">有设备开始镜像或播放视频时，如果电视停在主屏或其他应用里，自动打开映湾。需要给映湾开启“显示在其他应用上层”（打开开关会跳到对应设置页）。电视没有这个设置页时，可以用电脑授权：adb shell appops set com.weenas.castbay SYSTEM_ALERT_WINDOW allow</string>
+    <string name="open_on_cast_toast">请在电视上打开映湾查看投屏</string>
     <string name="setting_append_tv_name">名称后附加电视名称</string>
     <string name="setting_append_tv_name_note">手机上显示为：%1$s</string>
     <string name="frame_rate_fps">%1$d 帧/秒</string>

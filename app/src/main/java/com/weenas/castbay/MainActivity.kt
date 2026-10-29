@@ -77,6 +77,16 @@ class MainActivity : ComponentActivity() {
         return super.dispatchTouchEvent(event)
     }
 
+    override fun onStart() {
+        super.onStart()
+        com.weenas.castbay.service.ScreenLauncher.visible = true
+    }
+
+    override fun onStop() {
+        com.weenas.castbay.service.ScreenLauncher.visible = false
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // The manifest theme only paints the launch screen; the app itself has a plain background.
         setTheme(R.style.Theme_CastBay)
