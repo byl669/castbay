@@ -90,7 +90,7 @@ Wayland, PipeWire for the sound and the desktop portal (`xdg-desktop-portal`). I
 | Start with Windows / 开机自动启动 | Starts with Windows and waits in the tray. 随 Windows 启动并在系统托盘待命 |
 | Language / 语言 | Follow the system, Chinese or English (also for the tray menu). 跟随系统、中文或英文（托盘菜单同步） |
 | Paired receivers / 已配对的接收端 | The receivers paired before, with the last time connected; **Forget** removes one (the next cast pairs again). 配对过的接收端和上次连接时间；“忘记”后下次投屏需要重新配对 |
-| About / 关于 | Version, check for updates, open the log folder, licence and source. 版本、检查更新、日志文件夹、许可证与源码 |
+| About / 关于 | Version, check for updates (and the Update button, which installs the new version), open the log folder, licence and source. 版本、检查更新、日志文件夹、许可证与源码 |
 
 Changes apply to the next cast. 修改在下一次投屏时生效。
 

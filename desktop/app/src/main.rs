@@ -12,6 +12,7 @@ use castbay_sender::{Codec, Options, Status, Stopper, Target};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 mod settings;
+mod update;
 
 use settings::Settings;
 use tauri::menu::{Menu, MenuItem};
@@ -296,6 +297,44 @@ fn open_with_system(target: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Downloads and installs a newer version (see `update`). `Ok("installing")`: Windows is replacing
+/// this program and starts it again; `Ok("opened")`: the system's installer was opened (Linux).
+/// `Err("manual")`: this is not an installed copy (the portable zip, a development build), so the
+/// page offers the release page instead; `Err("busy")`: a cast is running.
+#[tauri::command]
+async fn install_update(version: String, app: AppHandle) -> Result<String, String> {
+    if app.state::<Casting>().stopper.lock().unwrap().is_some() {
+        return Err("busy".into());
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let installed = if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").is_some_and(|dir| exe.starts_with(std::path::Path::new(&dir).join("Programs").join("CastBay Desktop")))
+    } else {
+        exe == std::path::Path::new("/usr/bin/castbay-desktop")
+    };
+    if !installed {
+        return Err("manual".into());
+    }
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("update");
+    log(&app, &format!("update: fetching {version}"));
+    let file = tauri::async_runtime::spawn_blocking(move || update::fetch(&version, cfg!(windows), chinese(), &dir))
+        .await
+        .map_err(|e| e.to_string())?
+        .inspect_err(|e| log(&app, &format!("update: failed: {e}")))?;
+    log(&app, &format!("update: {} checked", file.display()));
+    #[cfg(windows)]
+    {
+        update::install(&file, &exe)?;
+        quit(&app);
+        Ok("installing".into())
+    }
+    #[cfg(not(windows))]
+    {
+        open_with_system(&file.to_string_lossy())?;
+        Ok("opened".into())
+    }
+}
+
 /// Shows the folder with the log file.
 #[tauri::command]
 fn open_logs(app: AppHandle) -> Result<(), String> {
@@ -518,7 +557,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, set_settings, list_paired, discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, autostart_get, autostart_set])
+        .invoke_handler(tauri::generate_handler![get_settings, set_settings, list_paired, discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, install_update, autostart_get, autostart_set])
         .run(tauri::generate_context!())
         .expect("the CastBay Desktop window failed to start");
 }

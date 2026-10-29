@@ -59,6 +59,11 @@ update it when something changes.
   (`Trojan:Win32/Bearfoos.A!ml`); an MSI has no program of its own to flag.
 - **Two installers, not one.** The language of an MSI's setup screens is fixed when it is built.
   One `setup.exe` that picks the language and also installs WebView2 is for after code signing.
-- **No automatic update.** The window tells you a newer release exists and opens its page.
+- **Updates are started by you.** The window tells you a newer release exists; the Update button
+  downloads the installer, checks it against the SHA-256 GitHub lists for the file, and on Windows
+  installs it over this version and opens the program again (on Linux the system's installer opens).
+  It does nothing while a cast runs, and the portable zip gets the release page instead. Nothing
+  updates in the background. Not tried yet against a real release (the first one that can is the
+  one after 0.1.2); it needs to reach github.com.
 - **Unsigned.** SmartScreen warns until the signature (SignPath Foundation, free for open source)
   is in place and the files build a reputation.
