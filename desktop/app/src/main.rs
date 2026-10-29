@@ -270,11 +270,18 @@ fn forget_receiver(id: String, app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Opens a release page of this project in the browser (and nothing else).
+/// Whether `url` is one of this project's pages the program opens: a release page on GitHub or a
+/// page of the website (the changelog), with nothing in it that could be taken for more.
+fn project_page(url: &str) -> bool {
+    (url.starts_with("https://github.com/weenas/castbay/releases/") || url.starts_with("https://castbay.weenas.com/"))
+        && !url.chars().any(|c| c.is_control() || c == '"' || c == ' ' || c == '\\')
+}
+
+/// Opens a release page or a page of the website in the browser (and nothing else).
 #[tauri::command]
 fn open_release(url: String) -> Result<(), String> {
-    if !url.starts_with("https://github.com/weenas/castbay/releases/") || url.chars().any(|c| c.is_control() || c == '"' || c == ' ') {
-        return Err("not a release page of this project".into());
+    if !project_page(&url) {
+        return Err("not a page of this project".into());
     }
     open_with_system(&url)
 }
@@ -330,8 +337,27 @@ async fn install_update(version: String, app: AppHandle) -> Result<String, Strin
     }
     #[cfg(not(windows))]
     {
-        open_with_system(&file.to_string_lossy())?;
-        Ok("opened".into())
+        // The password box of the system, then apt installs it; the program starts again from the new files.
+        let deb = file.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || update::install(&deb)).await.map_err(|e| e.to_string())?;
+        match result {
+            Ok(update::Installed::Yes) => {
+                log(&app, "update: installed");
+                update::start_again(&exe)?;
+                quit(&app);
+                Ok("installing".into())
+            }
+            Ok(update::Installed::Cancelled) => Err("cancelled".into()),
+            Ok(update::Installed::NoPrompt) => {
+                // No way to ask for the password here: the system's installer opens the file.
+                open_with_system(&file.to_string_lossy())?;
+                Ok("opened".into())
+            }
+            Err(e) => {
+                log(&app, &format!("update: install failed: {e}"));
+                Err(e)
+            }
+        }
     }
 }
 
@@ -564,7 +590,29 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::utc;
+    use super::{project_page, utc};
+
+    #[test]
+    fn only_this_projects_pages_are_opened() {
+        for ok in [
+            "https://github.com/weenas/castbay/releases/tag/desktop-v0.1.3",
+            "https://castbay.weenas.com/changelog#desktop-v0.1.3",
+            "https://castbay.weenas.com/zh/changelog#desktop-v0.1.3",
+        ] {
+            assert!(project_page(ok), "{ok}");
+        }
+        for bad in [
+            "https://evil.example/",
+            "http://castbay.weenas.com/changelog",
+            "https://castbay.weenas.com.evil.example/",
+            "file:///etc/passwd",
+            "https://castbay.weenas.com/a b",
+            "https://castbay.weenas.com/\"x",
+            "https://github.com/weenas/castbay/issues/1",
+        ] {
+            assert!(!project_page(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn dates_come_out_right() {

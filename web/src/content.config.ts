@@ -13,4 +13,14 @@ const releases = defineCollection({
   }),
 });
 
-export const collections = { releases };
+// CastBay Desktop's release notes, in the same shape (src/content/desktop/<lang>/<version>.md);
+// the changelog pages list them above the Android app's.
+const desktop = defineCollection({
+  loader: glob({ pattern: '*/*.md', base: './src/content/desktop' }),
+  schema: z.object({
+    version: z.string(),
+    date: z.coerce.date(),
+  }),
+});
+
+export const collections = { releases, desktop };

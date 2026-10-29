@@ -3,9 +3,11 @@ import Page from '../layouts/Page.astro';
 import { CERT_SHA256 } from '../i18n';
 import Changelog from '../components/Changelog.astro';
 import TocPage from '../components/TocPage.astro';
-import { releases } from '../releases';
+import DesktopChangelog from '../components/DesktopChangelog.astro';
+import { releases, desktopReleases } from '../releases';
 
-const entries = (await releases('en')).map((r) => ({ depth: 2, slug: `v${r.data.version}`, text: r.data.version }));
+const desktop = (await desktopReleases('en')).map((r) => ({ depth: 3, slug: `desktop-v${r.data.version}`, text: r.data.version }));
+const entries = [{ depth: 2, slug: 'desktop', text: 'CastBay Desktop' }, ...desktop, { depth: 2, slug: 'android', text: 'Android' }, ...(await releases('en')).map((r) => ({ depth: 2, slug: `v${r.data.version}`, text: r.data.version }))];
 ---
 <Page lang="en" page="changelog" title="Changelog – CastBay" description="What's new in each version of CastBay.">
 <TocPage lang="en" entries={entries}>
@@ -19,6 +21,8 @@ const entries = (await releases('en')).map((r) => ({ depth: 2, slug: `v${r.data.
       <p>To go back to an older version, uninstall CastBay first (Android won't install an older version over a newer one), then install it. Your settings are cleared with it.</p>
     </details>
   </Fragment>
+  <DesktopChangelog lang="en" />
+  <h2 id="android">Android</h2>
   <Changelog lang="en" />
 </TocPage>
 </Page>

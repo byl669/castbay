@@ -1,0 +1,28 @@
+---
+// CastBay Desktop's release notes in one language, newest first, each under its version and date,
+// with the download links of its release page. The app's "What's new" link opens #desktop-v<version>.
+import { render } from 'astro:content';
+import { formatDate, type Lang } from '../i18n';
+import { desktopReleases } from '../releases';
+
+const { lang } = Astro.props as { lang: Lang };
+const entries = await Promise.all(
+  (await desktopReleases(lang)).map(async (entry) => ({ entry, Content: (await render(entry)).Content })),
+);
+const intro =
+  lang === 'zh'
+    ? '电脑端映湾 Desktop（Windows 和 Linux）的更新内容。程序里有新版本时，点"更新"即可安装；也可以在<a href="https://github.com/weenas/castbay/releases">发布页</a>下载。'
+    : 'What changed in CastBay Desktop (Windows and Linux). When a new version is out, the Update button in the program installs it; the installers are also on the <a href="https://github.com/weenas/castbay/releases">releases page</a>.';
+const page = lang === 'zh' ? '发布页' : 'Release page';
+---
+<section id="desktop">
+  <h2>CastBay Desktop</h2>
+  <p set:html={intro} />
+  {entries.map(({ entry, Content }) => (
+    <section class="release" id={`desktop-v${entry.data.version}`}>
+      <h3>{entry.data.version} <span class="release-date">{formatDate(lang, entry.data.date)}</span></h3>
+      <Content />
+      <p class="checksum"><a href={`https://github.com/weenas/castbay/releases/tag/desktop-v${entry.data.version}`}>{page}</a></p>
+    </section>
+  ))}
+</section>

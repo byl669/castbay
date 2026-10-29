@@ -16,3 +16,9 @@ export async function releases(lang: Lang) {
   const all = await getCollection('releases', (entry) => entry.filePath?.includes(`/releases/${lang}/`));
   return all.sort((a, b) => newestFirst(a.data.version, b.data.version));
 }
+
+/** CastBay Desktop's release notes in [lang], newest first. */
+export async function desktopReleases(lang: Lang) {
+  const all = await getCollection('desktop', (entry) => entry.filePath?.includes(`/desktop/${lang}/`));
+  return all.sort((a, b) => newestFirst(a.data.version, b.data.version));
+}

@@ -3,9 +3,11 @@ import Page from '../../layouts/Page.astro';
 import { CERT_SHA256 } from '../../i18n';
 import Changelog from '../../components/Changelog.astro';
 import TocPage from '../../components/TocPage.astro';
-import { releases } from '../../releases';
+import DesktopChangelog from '../../components/DesktopChangelog.astro';
+import { releases, desktopReleases } from '../../releases';
 
-const entries = (await releases('zh')).map((r) => ({ depth: 2, slug: `v${r.data.version}`, text: r.data.version }));
+const desktop = (await desktopReleases('zh')).map((r) => ({ depth: 3, slug: `desktop-v${r.data.version}`, text: r.data.version }));
+const entries = [{ depth: 2, slug: 'desktop', text: 'CastBay Desktop' }, ...desktop, { depth: 2, slug: 'android', text: '安卓接收端' }, ...(await releases('zh')).map((r) => ({ depth: 2, slug: `v${r.data.version}`, text: r.data.version }))];
 ---
 <Page lang="zh" page="changelog" title="更新日志 – 映湾 CastBay" description="映湾每个版本的更新内容。">
 <TocPage lang="zh" entries={entries}>
@@ -19,6 +21,8 @@ const entries = (await releases('zh')).map((r) => ({ depth: 2, slug: `v${r.data.
       <p>如果想退回旧版本，需要先卸载映湾（安卓不允许用旧版本覆盖安装新版本），再安装旧版本，设置也会随之清除。</p>
     </details>
   </Fragment>
+  <DesktopChangelog lang="zh" />
+  <h2 id="android">安卓接收端</h2>
   <Changelog lang="zh" />
 </TocPage>
 </Page>

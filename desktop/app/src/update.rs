@@ -187,6 +187,66 @@ pub fn install(msi: &Path, exe: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// What came of asking the system to install the .deb.
+#[cfg(not(windows))]
+pub enum Installed {
+    /// Done; the caller starts the program again.
+    Yes,
+    /// The person closed the password box.
+    Cancelled,
+    /// pkexec is not there (or no password box could be shown): the caller opens the file instead.
+    NoPrompt,
+}
+
+/// The command that installs `deb` as an administrator: pkexec asks for the password in the
+/// system's own box, apt-get installs the file and takes its dependencies from the archives.
+#[cfg(not(windows))]
+fn install_command(deb: &Path) -> Command {
+    let mut c = Command::new("pkexec");
+    c.args(["/usr/bin/env", "DEBIAN_FRONTEND=noninteractive", "/usr/bin/apt-get", "install", "-y"]).arg(deb);
+    c
+}
+
+/// Linux: installs the .deb over this version. The system's app store would show it as "already
+/// installed" and offer no upgrade, so the program asks for the password itself.
+#[cfg(not(windows))]
+pub fn install(deb: &Path) -> Result<Installed, String> {
+    let out = match install_command(deb).output() {
+        Ok(out) => out,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Installed::NoPrompt),
+        Err(e) => return Err(e.to_string()),
+    };
+    match out.status.code() {
+        Some(0) => Ok(Installed::Yes),
+        // 126: the person dismissed the box (or may not); 127: no authentication agent to ask.
+        Some(126) => Ok(Installed::Cancelled),
+        Some(127) => Ok(Installed::NoPrompt),
+        _ => {
+            let text = String::from_utf8_lossy(&out.stderr);
+            let line = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+            Err(format!("apt-get: {}", if line.is_empty() { out.status.to_string() } else { line.to_string() }))
+        }
+    }
+}
+
+/// Linux: starts the program again after the installer replaced it. The running copy is still
+/// there (the single-instance check would send a new one away), so it waits a moment: the
+/// caller quits right after.
+#[cfg(not(windows))]
+pub fn start_again(exe: &Path) -> Result<(), String> {
+    use std::os::unix::process::CommandExt;
+    Command::new("sh")
+        .args(["-c", "sleep 3; exec \"$0\""])
+        .arg(exe)
+        .process_group(0)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,6 +317,18 @@ mod tests {
         assert!(site_digest(&site, "a.deb", "0.1.4").is_err(), "another version");
         assert!(site_digest(&site, "b.deb", "0.1.3").is_err(), "no such file");
         assert!(site_digest(&json!({"version": "0.1.3", "files": {"a.deb": "abc"}}), "a.deb", "0.1.3").is_err());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn the_install_runs_apt_get_as_an_administrator_on_that_file() {
+        let c = install_command(Path::new("/home/a b/castbay-desktop_0.1.3_amd64.deb"));
+        assert_eq!(c.get_program(), "pkexec");
+        let args: Vec<_> = c.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args[..5], ["/usr/bin/env", "DEBIAN_FRONTEND=noninteractive", "/usr/bin/apt-get", "install", "-y"]);
+        // One argument, a path: a space in it does not split it.
+        assert_eq!(args[5], "/home/a b/castbay-desktop_0.1.3_amd64.deb");
+        assert_eq!(args.len(), 6);
     }
 
     #[test]

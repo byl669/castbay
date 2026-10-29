@@ -5,7 +5,7 @@ const $ = (id) => document.getElementById(id);
 // ---------------------------------------------------------------- text
 const TEXT = {
   zh: {
-    app_name: "映湾桌面端", settings: "设置", download: "下载", update_now: "更新", got_it: "知道了", ok: "确定", search_again: "重新查找",
+    app_name: "映湾桌面端", settings: "设置", download: "下载", update_now: "更新", update_notes: "更新内容", got_it: "知道了", ok: "确定", search_again: "重新查找",
     aria_back: "返回", aria_settings: "设置", aria_refresh: "刷新", aria_what: "投什么", aria_source: "选择要投的内容", aria_code: "配对码",
     aria_s_quality: "画质", aria_s_audio: "同时传声音", aria_s_autostart: "开机自动启动",
     w_title: "开始使用", w_1: "在电视或平板上打开映湾，在设置里开启“电脑投屏”。",
@@ -30,7 +30,7 @@ const TEXT = {
     paired_intro: "这些接收端配对过。忘记后，下次投屏需要重新配对。", paired_none: "还没有配对过的接收端。", unnamed: "未命名的接收端",
     last_seen: "上次连接 {0}", forget: "忘记", forget_sure: "确认忘记", forget_receiver: "忘记这个接收端",
     update_text: "有新版本 {0} 可用",
-    up_downloading: "正在下载 {0}…", up_installing: "正在安装，程序会重新打开…", up_opened: "已打开安装程序，请按提示完成更新", up_busy: "投屏结束后再更新", up_error: "更新失败：{0}",
+    up_downloading: "正在下载 {0}…", up_installing: "正在安装，程序会重新打开…", up_opened: "已打开安装程序，请按提示完成更新", up_busy: "投屏结束后再更新", up_cancelled: "已取消更新", up_error: "更新失败：{0}",
     ended_stopped_by_receiver: "接收端结束了投屏", ended_replaced: "接收端被另一台设备占用了", ended_receiver_stopped: "接收端已停止接收",
     failed: "无法投屏：{0}",
     f_busy: "接收端正在被另一台设备使用。", f_blocked: "接收端屏蔽了这台电脑。请在接收端的“已知设备”里解除屏蔽。",
@@ -41,7 +41,7 @@ const TEXT = {
     f_encoder: "无法启动视频编码器：{0}", f_capture: "屏幕捕获出错：{0}", f_protocol: "和接收端通信出错：{0}",
   },
   en: {
-    app_name: "CastBay Desktop", settings: "Settings", download: "Download", update_now: "Update", got_it: "Got it", ok: "OK", search_again: "Search again",
+    app_name: "CastBay Desktop", settings: "Settings", download: "Download", update_now: "Update", update_notes: "What's new", got_it: "Got it", ok: "OK", search_again: "Search again",
     aria_back: "Back", aria_settings: "Settings", aria_refresh: "Refresh", aria_what: "What to cast", aria_source: "Choose what to cast", aria_code: "Pairing code",
     aria_s_quality: "Quality", aria_s_audio: "Send sound too", aria_s_autostart: "Start with Windows",
     w_title: "Getting started", w_1: "On the TV or tablet, open CastBay and turn on \"Desktop casting\" in its settings.",
@@ -66,7 +66,7 @@ const TEXT = {
     paired_intro: "These receivers were paired. After forgetting one, the next cast pairs again.", paired_none: "No receiver has been paired yet.", unnamed: "Unnamed receiver",
     last_seen: "Last connected {0}", forget: "Forget", forget_sure: "Forget it", forget_receiver: "Forget this receiver",
     update_text: "Version {0} is available",
-    up_downloading: "Downloading {0}…", up_installing: "Installing; the program opens again…", up_opened: "The installer is open: follow it to finish the update", up_busy: "Update after the cast has ended", up_error: "The update failed: {0}",
+    up_downloading: "Downloading {0}…", up_installing: "Installing; the program opens again…", up_opened: "The installer is open: follow it to finish the update", up_busy: "Update after the cast has ended", up_cancelled: "Update cancelled", up_error: "The update failed: {0}",
     ended_stopped_by_receiver: "The receiver ended the cast", ended_replaced: "Another device took over the receiver", ended_receiver_stopped: "The receiver stopped receiving",
     failed: "Could not cast: {0}",
     f_busy: "The receiver is being used by another device.", f_blocked: "The receiver blocks this computer. Unblock it in the receiver's known devices.",
@@ -399,7 +399,7 @@ async function installUpdate() {
   } catch (e) {
     button.disabled = false;
     if (e === "manual") { text.textContent = t("update_text", latest.version); invoke("open_release", { url: latest.url }).catch(() => {}); }
-    else text.textContent = e === "busy" ? t("up_busy") : t("up_error", e);
+    else text.textContent = e === "busy" ? t("up_busy") : e === "cancelled" ? t("up_cancelled") : t("up_error", e);
   }
 }
 
@@ -425,6 +425,10 @@ function wire() {
   $("welcome-ok").addEventListener("click", () => { $("welcome").hidden = true; save({ welcome_done: true }); });
   $("forget").addEventListener("click", async () => { if (failedReceiverId) { await invoke("forget_receiver", { id: failedReceiverId }); showError(""); refreshReceivers(); } });
   $("update-open").addEventListener("click", installUpdate);
+  // The website's changelog, at this version's notes, in the program's language.
+  $("update-notes").addEventListener("click", () => {
+    if (latest) invoke("open_release", { url: `https://castbay.weenas.com/${lang === "zh" ? "zh/" : ""}changelog#desktop-v${latest.version}` }).catch(() => {});
+  });
   $("start").addEventListener("click", startCast);
   $("stop").addEventListener("click", () => invoke("stop_cast"));
   $("code-ok").addEventListener("click", submitCode);
