@@ -232,3 +232,13 @@ jobs:
             "dist/CastBay-Desktop-$VERSION-source.tar.gz" \
             --title "CastBay Desktop $VERSION" --prerelease \
             --notes "CastBay Desktop $VERSION. **Windows 10/11 (64-bit)**: install with the .msi (zh-CN: Chinese setup screens, en-US: English; no administrator rights needed), or unzip the .zip and run \"CastBay Desktop.exe\" without installing. Not code-signed yet: if SmartScreen warns, choose More info, then Run anyway. **Linux (Ubuntu/Debian, 64-bit, Wayland with PipeWire)**: install the .deb with \`sudo apt install ./castbay-desktop_${VERSION}_amd64.deb\`; the system asks which screen or window to share. Casts a screen or window, with sound, to CastBay receivers; turn on Desktop casting in the receiver's settings first."
+
+      # Rebuilds the website, which holds the new release's installers for the app's update (see
+      # web/integrations/latest-desktop.mjs). Needs the CLOUDFLARE_DEPLOY_HOOK secret; without one
+      # it is skipped and they appear with the website's next update.
+      - name: Rebuild the website
+        env:
+          HOOK: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then echo "No CLOUDFLARE_DEPLOY_HOOK secret; skipped"; exit 0; fi
+          curl -fsS -X POST "$HOOK" > /dev/null && echo "Website rebuild started"

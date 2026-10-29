@@ -19,7 +19,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src https://api.github.com https://cast.weenas.com"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src https://api.github.com https://castbay.weenas.com https://cast.weenas.com"
     }
   },
   "bundle": {

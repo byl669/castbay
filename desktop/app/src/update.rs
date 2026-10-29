@@ -12,9 +12,11 @@ use sha2::{Digest, Sha256};
 
 const RELEASES: &str = "https://api.github.com/repos/weenas/castbay/releases/tags/desktop-v";
 const DOWNLOADS: &str = "https://github.com/weenas/castbay/releases/download/desktop-v";
-/// For networks that cannot reach GitHub (as for the Android app's updates, see util/Servers.kt):
-/// the relay passes on the release's description and its files, and nothing else. The file is
-/// checked against the SHA-256 in the description either way.
+/// For networks that cannot reach GitHub's downloads (as for the Android app's updates): the website
+/// holds the newest release's installers (web/integrations/latest-desktop.mjs) and a description
+/// of them, and its relay passes the description on where Cloudflare cannot be reached. The file
+/// is checked against the SHA-256 in the description either way.
+const SITE: &str = "https://castbay.weenas.com/desktop/";
 const RELAY: &str = "https://cast.weenas.com/desktop/";
 /// Far more than any installer of this program; stops a wrong file from filling the disk.
 const MAX_BYTES: u64 = 300_000_000;
@@ -71,14 +73,22 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// Where the release's description can be had: GitHub, then the relay.
-fn release_urls(version: &str) -> [String; 2] {
-    [format!("{RELEASES}{version}"), format!("{RELAY}{version}/release.json")]
+/// Where a release file can be had: the website, then GitHub.
+fn file_urls(version: &str, name: &str) -> [String; 2] {
+    [format!("{SITE}{version}/{name}"), format!("{DOWNLOADS}{version}/{name}")]
 }
 
-/// Where a release file can be had: GitHub, then the relay.
-fn file_urls(version: &str, name: &str) -> [String; 2] {
-    [format!("{DOWNLOADS}{version}/{name}"), format!("{RELAY}{version}/{name}")]
+/// The SHA-256 (lower case hex) of the file `name` in the website's description of the release
+/// (`{"version": "0.1.3", "files": {"name": "sha256", ...}}`); only for the version asked for.
+pub fn site_digest(description: &Value, name: &str, version: &str) -> Result<String, String> {
+    if description["version"].as_str() != Some(version) {
+        return Err("the website holds another version".into());
+    }
+    let digest = description["files"][name].as_str().unwrap_or_default().to_ascii_lowercase();
+    if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("the website lists no SHA-256 for the file".into());
+    }
+    Ok(digest)
 }
 
 fn curl() -> Command {
@@ -98,6 +108,32 @@ fn describe(output: &std::process::Output) -> String {
     format!("curl: {}", if line.is_empty() { output.status.to_string() } else { line.to_string() })
 }
 
+/// The file's SHA-256 from GitHub's description of the release, else the website's, else its relay's.
+fn digest_of(name: &str, version: &str) -> Result<String, String> {
+    let sources = [
+        (format!("{RELEASES}{version}"), false),
+        (format!("{SITE}latest.json"), true),
+        (format!("{RELAY}latest.json"), true),
+    ];
+    let mut failure = String::new();
+    for (url, site) in sources {
+        let out = curl().args(["--header", "Accept: application/vnd.github+json", &url]).output().map_err(|e| format!("curl: {e}"))?;
+        if !out.status.success() {
+            failure = describe(&out);
+            continue;
+        }
+        let Ok(json) = serde_json::from_slice::<Value>(&out.stdout) else {
+            failure = "the release description is not JSON".into();
+            continue;
+        };
+        match if site { site_digest(&json, name, version) } else { find_asset(&json, name, version).map(|(_, d)| d) } {
+            Ok(digest) => return Ok(digest),
+            Err(e) => failure = e,
+        }
+    }
+    Err(failure)
+}
+
 /// Downloads the installer for `version` into `dir` and checks it. Returns the file.
 pub fn fetch(version: &str, windows: bool, zh: bool, dir: &Path) -> Result<PathBuf, String> {
     if !valid_version(version) {
@@ -106,22 +142,7 @@ pub fn fetch(version: &str, windows: bool, zh: bool, dir: &Path) -> Result<PathB
     let arch = if cfg!(target_arch = "aarch64") { "arm64" } else { "amd64" };
     let name = asset_name(version, windows, zh, arch);
 
-    let mut failure = String::new();
-    let mut release = None;
-    for url in release_urls(version) {
-        let out = curl().args(["--header", "Accept: application/vnd.github+json", &url]).output().map_err(|e| format!("curl: {e}"))?;
-        if out.status.success() {
-            if let Ok(json) = serde_json::from_slice::<Value>(&out.stdout) {
-                release = Some(json);
-                break;
-            }
-            failure = "the release description is not JSON".into();
-        } else {
-            failure = describe(&out);
-        }
-    }
-    let release = release.ok_or(failure)?;
-    let (_, digest) = find_asset(&release, &name, version)?;
+    let digest = digest_of(&name, version)?;
 
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -222,13 +243,20 @@ mod tests {
     }
 
     #[test]
-    fn both_sources_name_the_same_release_and_file() {
-        let [github, relay] = file_urls("0.1.3", "a.deb");
+    fn files_come_from_the_website_then_github() {
+        let [site, github] = file_urls("0.1.3", "a.deb");
+        assert_eq!(site, "https://castbay.weenas.com/desktop/0.1.3/a.deb");
         assert_eq!(github, "https://github.com/weenas/castbay/releases/download/desktop-v0.1.3/a.deb");
-        assert_eq!(relay, "https://cast.weenas.com/desktop/0.1.3/a.deb");
-        let [api, relay] = release_urls("0.1.3");
-        assert_eq!(api, "https://api.github.com/repos/weenas/castbay/releases/tags/desktop-v0.1.3");
-        assert_eq!(relay, "https://cast.weenas.com/desktop/0.1.3/release.json");
+    }
+
+    #[test]
+    fn the_websites_description_is_checked() {
+        let hex = "Cd".repeat(32);
+        let site = json!({"version": "0.1.3", "files": {"a.deb": hex}});
+        assert_eq!(site_digest(&site, "a.deb", "0.1.3").unwrap(), "cd".repeat(32));
+        assert!(site_digest(&site, "a.deb", "0.1.4").is_err(), "another version");
+        assert!(site_digest(&site, "b.deb", "0.1.3").is_err(), "no such file");
+        assert!(site_digest(&json!({"version": "0.1.3", "files": {"a.deb": "abc"}}), "a.deb", "0.1.3").is_err());
     }
 
     #[test]

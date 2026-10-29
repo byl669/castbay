@@ -3,6 +3,7 @@
 import { defineConfig } from 'astro/config';
 import { satteri } from '@astrojs/markdown-satteri';
 import latestApk from './integrations/latest-apk.mjs';
+import latestDesktop from './integrations/latest-desktop.mjs';
 
 export default defineConfig({
   site: 'https://castbay.weenas.com',
@@ -13,5 +14,5 @@ export default defineConfig({
   // Keep the HTML readable, and quotes as written (Chinese text uses straight quotes).
   compressHTML: false,
   markdown: { processor: satteri({ features: { smartPunctuation: false } }) },
-  integrations: [latestApk()],
+  integrations: [latestApk(), latestDesktop()],
 });
