@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light dark; /* the system draws the open drop-down list: in the page's theme, not its own */
   --bg: #f4f5f7; --card: #ffffff; --card-2: #f8f9fb; --text: #15181c; --muted: #5c6672; --faint: #8a94a0;
   --line: #e1e5ea; --line-strong: #cfd5dc;
   --accent: #1e78dc; --accent-text: #ffffff; --accent-soft: #e6f0fb;
@@ -58,6 +59,7 @@ p { margin: 0; }
 
 .field { display: block; margin-top: 10px; } .field span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
 input[type=password], input#code, .select { width: 100%; padding: 9px 10px; border-radius: var(--r-sm); border: 1px solid var(--line-strong); background: var(--card); color: var(--text); font: inherit; }
+.select option { background: var(--card); color: var(--text); }
 .select.inline { width: auto; max-width: 55%; padding: 6px 8px; }
 .select { margin-top: 8px; }
 .segmented { display: flex; border: 1px solid var(--line-strong); border-radius: var(--r-sm); overflow: hidden; background: var(--card); }
