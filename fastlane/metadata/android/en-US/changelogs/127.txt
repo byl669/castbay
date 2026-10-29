@@ -1,0 +1,1 @@
+• New "Open When Casting" switch (off by default): CastBay opens by itself when a device starts mirroring or casting a video while it is not on screen.
