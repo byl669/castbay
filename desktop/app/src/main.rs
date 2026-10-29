@@ -86,6 +86,9 @@ struct ReceiverView {
     /// `open`, `ask` or `pin`.
     pair: String,
     password: bool,
+    /// The device's model and the receiving app's version, when the receiver says.
+    model: Option<String>,
+    app_version: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -126,6 +129,8 @@ async fn discover() -> Result<Vec<ReceiverView>, String> {
                 port: r.port,
                 pair: format!("{:?}", r.pair).to_lowercase(),
                 password: r.password,
+                model: r.model,
+                app_version: r.app_version,
             })
         })
         .collect();

@@ -201,7 +201,7 @@ function renderReceivers() {
     const pick = () => { selected = r; save({ last_receiver: r.id }); renderReceivers(); };
     list.append(el("li", { role: "option", "aria-selected": String(on), tabindex: "0", onclick: pick, onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } } },
       el("span", { class: "badge" }, icon("tv")),
-      el("div", { class: "grow" }, el("div", { class: "name", text: r.name }), el("div", { class: "meta", text: [r.ip, pairText(r)].join(" · ") })),
+      el("div", { class: "grow" }, el("div", { class: "name", text: r.name }), el("div", { class: "meta", text: [r.ip, r.model, r.app_version && `v${r.app_version}`].filter(Boolean).join(" · ") }), el("div", { class: "meta", text: pairText(r) })),
       el("span", { class: "end" }, on ? icon("check") : r.password ? icon("lock") : null)));
   }
   $("empty").hidden = receivers.length > 0;

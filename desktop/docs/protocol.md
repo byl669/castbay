@@ -23,6 +23,8 @@ The receiver publishes an mDNS service `_castbay._tcp` on its link port.
 | `name` | display name |
 | `fp` | first 16 hex characters of the SHA-256 of the receiver's certificate public key |
 | `pair` | `open`, `ask` or `pin`: what the receiver's casting verification needs |
+| `model` | optional: the device's model, to tell receivers apart in a list |
+| `app` | optional: the receiving app's version |
 
 The sender lists receivers by browsing; a receiver can also be added by IP address and port.
 The TXT records are hints; the authoritative identity is the certificate the receiver
