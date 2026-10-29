@@ -240,6 +240,18 @@ fn get_settings(settings: State<'_, SettingsState>) -> Settings {
 }
 
 /// Changes the fields named in `patch` and keeps them; returns all settings as they are now.
+/// Puts the choices back to a new install's (the receiver and source picked last stay).
+#[tauri::command]
+fn reset_settings(app: AppHandle, settings: State<'_, SettingsState>) -> Result<Settings, String> {
+    let mut current = settings.0.lock().unwrap();
+    let mut next = current.clone();
+    next.restore_defaults();
+    next.save(&app.path().app_data_dir().map_err(|e| e.to_string())?)?;
+    *current = next.clone();
+    log(&app, "settings restored to the defaults");
+    Ok(next)
+}
+
 #[tauri::command]
 fn set_settings(patch: serde_json::Value, app: AppHandle, settings: State<'_, SettingsState>) -> Result<Settings, String> {
     let mut current = settings.0.lock().unwrap();
@@ -751,7 +763,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![get_settings, set_settings, list_paired, discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, install_update, encoders, diagnostics_view, upload_report, crash_pending, send_crash_report, dismiss_crash, autostart_get, autostart_set])
+        .invoke_handler(tauri::generate_handler![get_settings, set_settings, reset_settings, list_paired, discover, sources, start_cast, submit_code, stop_cast, forget_receiver, open_logs, open_release, install_update, encoders, diagnostics_view, upload_report, crash_pending, send_crash_report, dismiss_crash, autostart_get, autostart_set])
         .run(tauri::generate_context!())
         .expect("the CastBay Desktop window failed to start");
 }

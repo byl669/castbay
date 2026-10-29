@@ -10,6 +10,8 @@ intro: '映湾是开源项目，用户的反馈是它变得更好的原因。一
 
 ## 报告问题
 
+**在映湾 Desktop（电脑端）里**：设置 → 关于 → **诊断信息** → **上传日志**，会得到一个报告编号（形如 CB-7K3F9Q）；然后到 [GitHub](https://github.com/weenas/castbay/issues) 提一个 Issue，写上你做了什么、版本号（在设置 → 关于里）和这个编号。
+
 <p class="report-id" id="report-id" hidden>你的报告编号：<strong></strong>。打开下面的问题报告时会自动填入。</p>
 
 提交一份[问题报告](https://github.com/weenas/castbay/issues/new?template=bug_report.yml)，表单会引导你填写找原因需要的信息：

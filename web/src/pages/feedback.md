@@ -10,6 +10,8 @@ intro: 'CastBay is open source, and reports from people using it are how it gets
 
 ## Report a problem
 
+**From CastBay Desktop**: Settings → About → **Diagnostics** → **Upload log** sends a report you can point to with its ID (such as CB-7K3F9Q); then open an issue on [GitHub](https://github.com/weenas/castbay/issues) with what you did, the version (shown under Settings → About) and that ID.
+
 <p class="report-id" id="report-id" hidden>Your report ID: <strong></strong>. It is filled in when you open the problem report below.</p>
 
 Open a [problem report](https://github.com/weenas/castbay/issues/new?template=bug_report.yml). It asks for what we need to find the cause:
