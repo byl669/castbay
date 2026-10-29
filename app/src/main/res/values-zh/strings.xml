@@ -138,7 +138,6 @@
 
     <!-- About -->
     <string name="about">关于</string>
-    <string name="about_version">版本 %1$s</string>
     <string name="about_website">官网</string>
     <string name="about_privacy">隐私政策</string>
     <string name="about_source">源代码</string>
