@@ -77,7 +77,9 @@ async function receiveReport(request, env) {
   if (!/^\d+(\.\d+){1,3}(-[0-9A-Za-z.]+)?(\+[0-9A-Za-z.]+)?$/.test(version) || version.length > 40) {
     return json({ error: 'version' }, 400);
   }
-  const kind = request.headers.get('X-CastBay-Report') === 'crash' ? 'crash' : 'manual';
+  // manual (the person pressed Upload), crash (the program ended badly), failure (a cast failed; CastBay Desktop only).
+  const sent = request.headers.get('X-CastBay-Report');
+  const kind = sent === 'crash' || sent === 'failure' ? sent : 'manual';
   // Which program sent it: the TV app (no header, as before) or CastBay Desktop.
   const app = request.headers.get('X-CastBay-App') === 'desktop' ? 'desktop' : 'tv';
   if (env.UPLOAD_LIMIT) {

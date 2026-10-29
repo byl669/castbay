@@ -61,10 +61,17 @@ The report is sent over HTTPS to this website (castbay.weenas.com, hosted by Clo
 
 CastBay Desktop, the Windows and Linux program that casts a computer's screen to a CastBay receiver, has no account and no tracking code either. Beyond what the TV app does for casting, it asks the network for two things on its own, both to find a newer version: GitHub's list of releases (and, where GitHub can't be reached, this website's note on the newest one) when it starts, and, when you press **Update**, the installer, from this website or GitHub. Nothing about you or your computer is sent with them (the servers see a network address, as for any web page).
 
-The one thing it can send of its own kind is a **problem report**, only when you press it: Settings → About → **Diagnostics** shows what would be sent, and nothing leaves the computer until you press **Upload log** and confirm. The report holds:
+The one thing it can send of its own kind is a **problem report**, in these cases only:
+
+- **You upload one**: Settings → About → **Diagnostics** shows what would be sent, and nothing leaves the computer until you press **Upload log** and confirm.
+- **After it ended badly** (a crash, or it was closed from outside during a cast): the next time it starts, the home screen asks whether to send a report about it, and sends one only if you press Send.
+- **If you turn on Send error reports** (Settings, off by default): such a report is sent without asking, and so is one when a cast fails because of the encoder or the screen capture (at most one an hour). Turn it off to stop that.
+
+The report holds:
 
 - This computer's operating system and architecture, the web view's version, which video encoders (graphics card or CPU) open on it, and CastBay Desktop's settings (frame rate, bitrate, encoder, sound on or off, language) and the number of receivers paired. No names.
 - The program's own recent log (at most about 400 KB): casts started and ended, the encoder used, errors.
+- For a report after a crash: the error and where in CastBay's code it happened (the call stack). For a failed cast: the kind of failure and its message.
 
 Taken out on the computer before sending: every network address, the names of receivers, and your user folder in file paths. Window titles are not written to the log at all.
 

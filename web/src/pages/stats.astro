@@ -115,7 +115,7 @@ import Page from '../layouts/Page.astro';
         link.rel = 'noopener';
         link.textContent = r.id;
         var cells = [link, new Date(r.received).toLocaleString('zh-CN'), r.version,
-          (r.app === 'desktop' ? '桌面端' : '') + (r.kind === 'crash' ? '崩溃' : '手动'), Math.max(1, Math.round(r.size / 1024)) + ' KB'];
+          (r.app === 'desktop' ? '桌面端' : '') + (r.kind === 'crash' ? '崩溃' : r.kind === 'failure' ? '投屏失败' : '手动'), Math.max(1, Math.round(r.size / 1024)) + ' KB'];
         var labels = ['编号', '时间', '版本', '类型', '大小'];
         cells.forEach(function (c, i) {
           var td = document.createElement('td');
