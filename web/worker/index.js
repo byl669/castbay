@@ -78,6 +78,8 @@ async function receiveReport(request, env) {
     return json({ error: 'version' }, 400);
   }
   const kind = request.headers.get('X-CastBay-Report') === 'crash' ? 'crash' : 'manual';
+  // Which program sent it: the TV app (no header, as before) or CastBay Desktop.
+  const app = request.headers.get('X-CastBay-App') === 'desktop' ? 'desktop' : 'tv';
   if (env.UPLOAD_LIMIT) {
     const { success } = await env.UPLOAD_LIMIT.limit({ key: clientAddress(request, env) });
     if (!success) return json({ error: 'too many' }, 429);
@@ -95,7 +97,7 @@ async function receiveReport(request, env) {
     const stored = await env.REPORTS.put(key, body, {
       onlyIf: { etagDoesNotMatch: '*' },
       httpMetadata: { contentType: 'text/plain; charset=utf-8' },
-      customMetadata: { version, kind, received: new Date().toISOString() },
+      customMetadata: { version, kind, app, received: new Date().toISOString() },
     });
     if (stored) return json({ id }, 201);
   }
@@ -263,6 +265,7 @@ async function recentReports(env) {
       received: o.customMetadata?.received ?? o.uploaded.toISOString(),
       version: o.customMetadata?.version ?? '',
       kind: o.customMetadata?.kind ?? 'manual',
+      app: o.customMetadata?.app ?? 'tv',
       size: o.size,
     }))
     .sort((a, b) => (a.received < b.received ? 1 : -1));

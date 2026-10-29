@@ -5,7 +5,7 @@ page: privacy
 title: 'Privacy Policy – CastBay'
 description: 'CastBay''s privacy policy: no account, no ads, no third-party analytics; nothing is sent unless you choose to. Lyrics lookups, the update check, problem reports and anonymous usage statistics are optional.'
 heading: 'Privacy Policy'
-intro: 'Effective: October 5, 2026'
+intro: 'Effective: October 29, 2026'
 ---
 
 CastBay is an open-source casting receiver app for Android TVs, car displays and tablets. It needs no account and contains no ads or third-party analytics or tracking code.
@@ -56,6 +56,19 @@ A problem report is sent in two cases, both your choice:
 **Where it goes and for how long**
 
 The report is sent over HTTPS to this website (castbay.weenas.com, hosted by Cloudflare) and kept in its storage for 90 days, then deleted automatically. Only the developer can read it: there is no public link to it. You get a short report ID (such as CB-7K3F9Q) to give in your problem report; nothing else ties the report to you. Your network's address is used only to limit how many reports can be sent in a row and is not stored with the report. To have a report deleted sooner, open an issue on [GitHub](https://github.com/weenas/castbay/issues) with its ID.
+
+## CastBay Desktop (the computer program)
+
+CastBay Desktop, the Windows and Linux program that casts a computer's screen to a CastBay receiver, has no account and no tracking code either. Beyond what the TV app does for casting, it asks the network for two things on its own, both to find a newer version: GitHub's list of releases (and, where GitHub can't be reached, this website's note on the newest one) when it starts, and, when you press **Update**, the installer, from this website or GitHub. Nothing about you or your computer is sent with them (the servers see a network address, as for any web page).
+
+The one thing it can send of its own kind is a **problem report**, only when you press it: Settings → About → **Diagnostics** shows what would be sent, and nothing leaves the computer until you press **Upload log** and confirm. The report holds:
+
+- This computer's operating system and architecture, the web view's version, which video encoders (graphics card or CPU) open on it, and CastBay Desktop's settings (frame rate, bitrate, encoder, sound on or off, language) and the number of receivers paired. No names.
+- The program's own recent log (at most about 400 KB): casts started and ended, the encoder used, errors.
+
+Taken out on the computer before sending: every network address, the names of receivers, and your user folder in file paths. Window titles are not written to the log at all.
+
+It is kept and read as the TV app's reports are (see above): over HTTPS to this website, or its relay where Cloudflare can't be reached, kept 90 days, readable only by the developer, identified by a short report ID that you give in your problem report.
 
 ## Usage statistics (only if you turn them on)
 
