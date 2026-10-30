@@ -238,13 +238,20 @@ public final class PlexCompanion implements AutoCloseable {
                 + "</MediaContainer>";
     }
 
+    /**
+     * The player record a Plex controller reads before it will send a command. It carries the same
+     * fields a stock Plex player reports: `provides` and `deviceClass` are what the app filters on.
+     */
     private String resources() {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                 + "<MediaContainer size=\"1\">\n"
                 + "<Player title=\"" + escape(name) + "\" machineIdentifier=\"" + escape(uuid) + "\""
-                + " product=\"CastBay\" version=\"" + escape(VERSION) + "\""
-                + " platform=\"Android\" deviceClass=\"stb\" protocolVersion=\"1\""
-                + " protocolCapabilities=\"timeline,playback,playqueues\"/>\n"
+                + " product=\"Plex for Android\" version=\"" + escape(VERSION) + "\""
+                + " platform=\"Android\" platformVersion=\"13\" device=\"stb\" deviceClass=\"stb\""
+                + " protocol=\"plex\" protocolVersion=\"1\""
+                + " protocolCapabilities=\"timeline,playback,playqueues,provider-playback,navigation\""
+                + " provides=\"player\""
+                + " titleSort=\"\"/>\n"
                 + "</MediaContainer>";
     }
 

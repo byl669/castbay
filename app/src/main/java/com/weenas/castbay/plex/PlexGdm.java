@@ -45,11 +45,13 @@ public final class PlexGdm implements AutoCloseable {
         this.headers = "Content-Type: plex/media-player\r\n"
                 + "Name: " + name + "\r\n"
                 + "Port: " + httpPort + "\r\n"
-                + "Product: CastBay\r\n"
+                + "Product: Plex for Android\r\n"
                 + "Protocol: plex\r\n"
                 + "Protocol-Version: 1\r\n"
-                + "Protocol-Capabilities: timeline,playback,playqueues\r\n"
+                + "Protocol-Capabilities: timeline,playback,playqueues,provider-playback,navigation\r\n"
                 + "Resource-Identifier: " + uuid + "\r\n"
+                + "Device-Class: stb\r\n"
+                + "Provides: player\r\n"
                 + "Version: " + version + "\r\n"
                 + "\r\n";
         MulticastSocket created = new MulticastSocket(null);
