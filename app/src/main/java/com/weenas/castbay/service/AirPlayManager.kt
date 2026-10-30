@@ -201,8 +201,11 @@ class AirPlayManager private constructor(private val context: Context) {
     /** The running receiver's settings (DLNA checks the second-device policy against them). */
     @Volatile private var activeSettings = ReceiverSettings()
 
-    /** Who started the video in [hlsPlayer]: AirPlay (e.g. YouTube) or DLNA (e.g. Bilibili's cast button). */
-    private enum class VideoSource { AIRPLAY, DLNA }
+    /**
+     * Who started the video in [hlsPlayer]: AirPlay (e.g. YouTube), DLNA (a video app's own cast
+     * button) or Bilibili's own protocol ([com.weenas.castbay.bili.NvaReceiver]).
+     */
+    private enum class VideoSource { AIRPLAY, DLNA, BILI }
     @Volatile private var videoSource: VideoSource? = null
 
     /** DLNA senders' commands, played with the same player, screen and quick menu as AirPlay video. */
@@ -324,7 +327,7 @@ class AirPlayManager private constructor(private val context: Context) {
             // screen. The sender sees STOPPED at once.
             hlsPlayer.stop()
             mainHandler.post {
-                if (dlnaOnScreen() && !currentStreamInfo.awaitingNext) awaitNext(STOP_WAIT_MS, "DLNA video stopped by the app", quietly = true)
+                if (castVideoOnScreen() && !currentStreamInfo.awaitingNext) awaitNext(STOP_WAIT_MS, "DLNA video stopped by the app", quietly = true)
             }
         }
 
@@ -368,6 +371,82 @@ class AirPlayManager private constructor(private val context: Context) {
 
     /** The AirPlay video player while one is active. Main thread only. */
     val videoPlayer: ExoPlayer? get() = hlsPlayer.player
+
+    /**
+     * Bilibili's casts play in the same player as AirPlay video and DLNA, and show the same
+     * full-screen picture with the same quick menu. Unlike DLNA, nothing comes from the phone
+     * but a video id: the link is fetched here (see [com.weenas.castbay.bili.BiliApi]) and the
+     * phone is told how far playback has got.
+     */
+    private val biliPlayer = object : com.weenas.castbay.bili.NvaPlayer {
+        @Volatile private var durationSec = 0
+        @Volatile private var report = com.weenas.castbay.bili.NvaPlayer.Progress(0, 0, false, true)
+        @Volatile private var volume = 100
+
+        override fun play(
+            manifest: String,
+            startSec: Int,
+            durationSec: Int,
+            title: String,
+            qn: Int,
+            speed: Float
+        ) {
+            Log.i(TAG, "Bilibili ${Log.personal(title)} from ${startSec}s")
+            this.durationSec = durationSec
+            videoSource = VideoSource.BILI
+            mainHandler.removeCallbacks(stopAwaitingNext)
+            videoRenderer.stop()
+            audioRenderer.stop()
+            hlsPlayer.setSpeed(speed)
+            hlsPlayer.setVolume(volume / 100f)
+            hlsPlayer.play(manifest, startSec.toFloat(), "application/dash+xml") {
+                currentError = null
+                currentStreamInfo = StreamInfo(
+                    sourceName = title, isVideoPlayback = true, isDlna = true, isBili = true,
+                    sender = "bilibili"
+                )
+                currentState = AirPlayConnectionState.Streaming
+            }
+        }
+
+        override fun setPaused(paused: Boolean) {
+            if (videoSource == VideoSource.BILI) hlsPlayer.setRate(if (paused) 0f else 1f)
+        }
+
+        override fun seekTo(sec: Int) {
+            if (videoSource == VideoSource.BILI) hlsPlayer.seek(sec.toFloat())
+        }
+
+        override fun stop() {
+            if (videoSource != VideoSource.BILI) return
+            videoSource = null
+            // Commands arrive on protocol threads; the screen changes on the main one.
+            mainHandler.post { onVideoStopped(null) }
+        }
+
+        override fun setVolume(percent: Int) {
+            volume = percent.coerceIn(0, 100)
+            if (videoSource == VideoSource.BILI) hlsPlayer.setVolume(volume / 100f)
+        }
+
+        override fun setSpeed(rate: Float) {
+            if (videoSource == VideoSource.BILI) hlsPlayer.setSpeed(rate)
+        }
+
+        override fun progress(): com.weenas.castbay.bili.NvaPlayer.Progress? {
+            if (videoSource != VideoSource.BILI) return null
+            val current = hlsPlayer.progress()
+            if (!current.active) return null
+            val duration = if (current.durationSec > 0) current.durationSec else durationSec.toDouble()
+            report = com.weenas.castbay.bili.NvaPlayer.Progress(
+                positionSec = current.positionSec.toInt(),
+                durationSec = duration.toInt(),
+                playing = current.playing && !current.buffering,
+                loading = current.buffering
+            )
+            return report
+        }
+    }
     private val settingsStore = ReceiverSettingsStore(context)
 
     private val _stateCallbacks = mutableListOf<(AirPlayConnectionState, StreamInfo, String?) -> Unit>()
@@ -494,8 +573,9 @@ class AirPlayManager private constructor(private val context: Context) {
         if (settings.dlnaEnabled) Thread({ dlna.start(settings.advertisedName, dlnaTarget) }, "DLNA-start").start()
         // Plex (the official app's "play to device") runs beside AirPlay and DLNA; a failure only logs.
         if (settings.dlnaEnabled) Thread({ plex.start(settings.advertisedName) }, "Plex-start").start()
-        // Bilibili's own cast protocol ("哔哩必连"): probe build, records what the phone sends.
-        if (settings.dlnaEnabled) Thread({ bili.start(settings.advertisedName) }, "Bili-start").start()
+        // Bilibili's own cast protocol ("哔哩必连"): the phone hands over its account key and the
+        // TV fetches the stream itself, so a cast is not held to DLNA's 720p.
+        if (settings.dlnaEnabled) Thread({ bili.start(settings.advertisedName, biliPlayer) }, "Bili-start").start()
         // CastBay Desktop: computers casting over CastBay Link.
         if (settings.desktopEnabled) {
             Thread({
@@ -594,7 +674,7 @@ class AirPlayManager private constructor(private val context: Context) {
         if (isMirroring && width > 0 && height > 0) {
             videoRenderer.configure(width, height)
         }
-        stopDlnaVideo()
+        stopCastVideo()
         currentStreamInfo = StreamInfo(name, model, width, height, fps, sampleRate, channels, isMirroring, true, sender = airPlaySender)
         currentError = null
         currentState = AirPlayConnectionState.Streaming
@@ -610,7 +690,7 @@ class AirPlayManager private constructor(private val context: Context) {
         dacp.clear()
         mediaSession.update(null)
         // An AirPlay session ending (e.g. a phone that was only probing) leaves DLNA video playing.
-        if (dlnaOnScreen()) return
+        if (castVideoOnScreen()) return
         hlsPlayer.stop()
         currentStreamInfo = StreamInfo()
         currentState = AirPlayConnectionState.Discovering
@@ -622,7 +702,7 @@ class AirPlayManager private constructor(private val context: Context) {
         // A new sender's first poll mustn't be told about a video that finished before it came.
         hlsPlayer.forgetFinished()
         // DLNA video stays on screen until the AirPlay sender actually streams something.
-        if (dlnaOnScreen()) return
+        if (castVideoOnScreen()) return
         currentState = AirPlayConnectionState.Connecting
     }
 
@@ -697,7 +777,7 @@ class AirPlayManager private constructor(private val context: Context) {
             audioFocus.acquire()
         }
         if (currentState == AirPlayConnectionState.Connecting || videoSource == VideoSource.DLNA) {
-            stopDlnaVideo()
+            stopCastVideo()
             currentStreamInfo = StreamInfo(isAudioOnly = true, sender = airPlaySender, nowPlaying = nowPlaying)
             currentState = AirPlayConnectionState.Streaming
             mediaSession.update(nowPlaying)
@@ -780,8 +860,13 @@ class AirPlayManager private constructor(private val context: Context) {
     fun playbackStats(): PlaybackStats? {
         val stream = currentStreamInfo
         val stats = when {
-            stream.isVideoPlayback ->
-                hlsPlayer.stats(if (stream.isDlna) "DLNA video" else "AirPlay video") ?: return null
+            stream.isVideoPlayback -> hlsPlayer.stats(
+                when {
+                    stream.isBili -> "Bilibili video"
+                    stream.isDlna -> "DLNA video"
+                    else -> "AirPlay video"
+                }
+            ) ?: return null
             stream.isAudioOnly && stream.isDlna -> hlsPlayer.stats("DLNA audio") ?: return null
             stream.isMirroring -> PlaybackStats(
                 "Screen mirroring", videoRenderer.stats(), audioRenderer.stats(), senderReportLines()
@@ -974,7 +1059,7 @@ class AirPlayManager private constructor(private val context: Context) {
             Log.i(TAG, "Desktop sender: ${Log.personal(name)}, ${width}x$height")
             synchronized(desktopLock) {
                 // Another sender on screen (a second device taking over is allowed): it makes way.
-                if (dlnaOnScreen()) stopDlnaVideo()
+                if (castVideoOnScreen()) stopCastVideo()
                 if (airPlayStreaming()) nativeBridge.disconnect()
                 mainHandler.removeCallbacks(stopAwaitingNext)
                 desktopSession = session
@@ -1100,7 +1185,9 @@ class AirPlayManager private constructor(private val context: Context) {
             }
             return
         }
-        if (dlnaOnScreen()) {
+        if (castVideoOnScreen()) {
+            // Bilibili's phone is waiting to hear that the TV stopped, or it would think it plays on.
+            if (videoSource == VideoSource.BILI) bili.stopPlayback()
             onVideoStopped(null)
             return
         }
@@ -1119,10 +1206,15 @@ class AirPlayManager private constructor(private val context: Context) {
         currentState = AirPlayConnectionState.Discovering
     }
 
-    /** DLNA video or music is on screen. */
-    private fun dlnaOnScreen() = videoSource == VideoSource.DLNA && currentStreamInfo.isDlna
+    /**
+     * A cast video is on screen: DLNA's, or Bilibili's own protocol. Both are the same picture
+     * and the same player, and both keep the screen when an AirPlay sender's session ends.
+     */
+    private fun castVideoOnScreen() =
+        (videoSource == VideoSource.DLNA || videoSource == VideoSource.BILI) && currentStreamInfo.isDlna
 
-    private fun dlnaMusicPlaying() = dlnaOnScreen() && currentStreamInfo.isAudioOnly
+    private fun dlnaMusicPlaying() = videoSource == VideoSource.DLNA && currentStreamInfo.isDlna &&
+        currentStreamInfo.isAudioOnly
 
     /**
      * Keeps DLNA music's progress and play state on the music screen and media session in step
@@ -1171,8 +1263,8 @@ class AirPlayManager private constructor(private val context: Context) {
     @Volatile private var dlnaSongUrl: String? = null
 
     /** AirPlay mirroring or audio starting takes the screen from DLNA video. */
-    private fun stopDlnaVideo() {
-        if (videoSource != VideoSource.DLNA) return
+    private fun stopCastVideo() {
+        if (videoSource != VideoSource.DLNA && videoSource != VideoSource.BILI) return
         videoSource = null
         hlsPlayer.stop()
     }
@@ -1184,10 +1276,12 @@ class AirPlayManager private constructor(private val context: Context) {
      */
     private fun onVideoFinished(error: String?) {
         val stream = currentStreamInfo
-        if (error != null || !dlnaOnScreen() || stream.isAudioOnly || currentState != AirPlayConnectionState.Streaming) {
+        if (error != null || !castVideoOnScreen() || stream.isAudioOnly || currentState != AirPlayConnectionState.Streaming) {
             onVideoStopped(error)
             return
         }
+        // Bilibili's phone shows the end of an episode from this, then casts the next one.
+        if (videoSource == VideoSource.BILI) bili.finished()
         hlsPlayer.stop()
         awaitNext(NEXT_VIDEO_WAIT_MS, "DLNA video ended")
     }

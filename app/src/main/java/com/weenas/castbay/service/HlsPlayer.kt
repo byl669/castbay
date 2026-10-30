@@ -45,6 +45,11 @@ class HlsPlayer(
     @Volatile private var snapshot = Snapshot()
     /** Linear gain from the sender's volume slider; applied to each new player. */
     @Volatile private var volume = 1f
+    /**
+     * Playback speed asked for by the sender (Bilibili's cast controls it); applied when the
+     * player is built, so a cast that starts at 1.5× does not begin at 1×.
+     */
+    @Volatile private var speed = 1f
 
     private data class Snapshot(
         val durationSec: Double = 0.0,
@@ -219,6 +224,7 @@ class HlsPlayer(
             return
         }
         exo.playWhenReady = true
+        exo.setPlaybackSpeed(speed)
         main.removeCallbacks(progressUpdater)
         main.post(progressUpdater)
         onStarted()
@@ -262,6 +268,15 @@ class HlsPlayer(
     fun setVolume(gain: Float) {
         volume = gain
         main.post { player?.volume = gain }
+    }
+
+    /**
+     * Playback speed, from a sender that offers one (Bilibili's cast: 0.5× to 2×). Pausing is
+     * [setRate]; this only changes how fast the picture plays.
+     */
+    fun setSpeed(rate: Float) {
+        speed = rate.coerceIn(0.25f, 3f)
+        main.post { player?.setPlaybackSpeed(speed) }
     }
 
     fun stop() {

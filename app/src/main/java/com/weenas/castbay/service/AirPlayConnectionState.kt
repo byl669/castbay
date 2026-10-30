@@ -31,6 +31,11 @@ data class StreamInfo(
     val isAudioOnly: Boolean = false,
     /** Cast over DLNA (video, or music with [isAudioOnly]) rather than AirPlay. */
     val isDlna: Boolean = false,
+    /**
+     * Cast with Bilibili's own protocol, which also sets [isDlna]: it is not AirPlay either, and
+     * behaves like a DLNA cast (it owns the screen, and a second sender waits).
+     */
+    val isBili: Boolean = false,
     /** A computer casting with CastBay Desktop (CastBay Link), as mirroring. */
     val isDesktop: Boolean = false,
     /**

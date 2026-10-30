@@ -42,6 +42,23 @@ object Nva {
     private const val CHANNEL_NAME = "master"
     private const val CAPABILITY = "255"
 
+    /**
+     * The Bilibili app decides "is this one of our boxes?" from the device description alone: it
+     * never searched for [SERVICE_TYPE] and it never fetched the SCPD, it only fetched this
+     * description and then listed the device under "lower quality". A device claiming CastBay as
+     * its manufacturer is just a generic renderer to it; the three fields below are what the
+     * two working receivers (Macast's nirvana plugin, BilibiliLive's ATV client) both advertise.
+     */
+    private const val MANUFACTURER = "Bilibili Inc."
+    private const val MANUFACTURER_URL = "https://bilibili.com/"
+    private const val MODEL_DESCRIPTION = "云视听小电视"
+    private const val MODEL_NAME = "BRAVIA 4K 2015"
+    private const val MODEL_URL = "https://app.bilibili.com/"
+    private const val MODEL_NUMBER = "1024"
+
+    /** The name the phone lists, spelled the way the stock receiver spells it. */
+    const val DEVICE_NAME = "我的小电视"
+
     /** Frame types on the control connection. */
     const val SEND = 0xE0
     const val RET = 0xC0
@@ -66,7 +83,7 @@ object Nva {
     val NIRVANA_CONTROL = "/$SERVICE_NAME/control"
     val NIRVANA_EVENT = "/$SERVICE_NAME/event"
 
-    fun device(friendlyName: String, uuid: String): String {
+    fun device(uuid: String): String {
         val services = (UpnpDescriptions.SERVICES.map { service ->
             """      <service>
         <serviceType>${service.type}</serviceType>
@@ -87,20 +104,22 @@ object Nva {
   <specVersion><major>1</major><minor>0</minor></specVersion>
   <device>
     <deviceType>${Ssdp.MEDIA_RENDERER}</deviceType>
-    <friendlyName>${com.weenas.castbay.dlna.Soap.escape(friendlyName)}</friendlyName>
-    <manufacturer>CastBay</manufacturer>
-    <manufacturerURL>https://castbay.weenas.com</manufacturerURL>
-    <modelDescription>CastBay</modelDescription>
-    <modelName>CastBay</modelName>
-    <modelNumber>1</modelNumber>
-    <serialNumber>1</serialNumber>
+    <friendlyName>$DEVICE_NAME</friendlyName>
+    <manufacturer>$MANUFACTURER</manufacturer>
+    <manufacturerURL>$MANUFACTURER_URL</manufacturerURL>
+    <modelDescription>$MODEL_DESCRIPTION</modelDescription>
+    <modelName>$MODEL_NAME</modelName>
+    <modelNumber>$MODEL_NUMBER</modelNumber>
+    <modelURL>$MODEL_URL</modelURL>
+    <serialNumber>$MODEL_NUMBER</serialNumber>
     <UDN>uuid:$uuid</UDN>
-    <X_brandName>CastBay</X_brandName>
+    <X_brandName>$MANUFACTURER</X_brandName>
     <hostVersion>$HOST_VERSION</hostVersion>
     <ottVersion>$OTT_VERSION</ottVersion>
     <channelName>$CHANNEL_NAME</channelName>
     <capability>$CAPABILITY</capability>
     <dlna:X_DLNADOC>DMR-1.50</dlna:X_DLNADOC>
+    <dlna:X_DLNACAP>playcontainer-1-0</dlna:X_DLNACAP>
     <serviceList>
 $services
     </serviceList>
@@ -184,6 +203,51 @@ $services
     /** A command the phone sent: [method] (e.g. "Play") and its JSON payload, if any. */
     class Command(val counter: Int, val method: String, val payload: String?)
 
+    /**
+     * The `Play` payload. `seekTs` is in seconds; `isOpen` false means the phone's pause button
+     * (the same command carries both, so a new `Play` and a resume look alike).
+     */
+    class PlayRequest(
+        val aid: Long,
+        val cid: Long,
+        val epid: Long,
+        val seasonId: Long,
+        val accessKey: String,
+        val qn: Int,
+        val speed: Float,
+        val startSec: Int,
+        val open: Boolean,
+        val roomId: Long,
+        val contentType: Int
+    ) {
+        /** A live room has no DASH and no seek bar, and casts differently. */
+        val isLive: Boolean get() = roomId > 0L
+
+        companion object {
+            fun parse(payload: String?): PlayRequest? {
+                if (payload.isNullOrBlank()) return null
+                return runCatching {
+                    val json = com.google.gson.JsonParser.parseString(payload).asJsonObject
+                    fun long(name: String) = json.get(name)?.takeIf { !it.isJsonNull }?.asLong ?: 0L
+                    fun text(name: String) = json.get(name)?.takeIf { !it.isJsonNull }?.asString.orEmpty()
+                    PlayRequest(
+                        aid = long("aid"),
+                        cid = long("cid"),
+                        epid = long("epId"),
+                        seasonId = long("seasonId"),
+                        accessKey = text("accessKey"),
+                        qn = (json.get("userDesireQn")?.takeIf { !it.isJsonNull }?.asInt ?: 0),
+                        speed = (json.get("userDesireSpeed")?.takeIf { !it.isJsonNull }?.asFloat ?: 1f),
+                        startSec = long("seekTs").toInt().coerceAtLeast(0),
+                        open = json.get("isOpen")?.takeIf { !it.isJsonNull }?.asBoolean ?: true,
+                        roomId = long("roomId"),
+                        contentType = (json.get("contentType")?.takeIf { !it.isJsonNull }?.asInt ?: 0)
+                    )
+                }.getOrNull()
+            }
+        }
+    }
+
     /** A reply to a command, with no payload: the shape every acknowledgement takes. */
     fun ack(counter: Int): ByteArray = byteArrayOf(RET.toByte(), 0, intByte(counter, 0), intByte(counter, 1), intByte(counter, 2), intByte(counter, 3))
 
@@ -204,23 +268,28 @@ $services
 
     /**
      * A command from the receiver to the phone, e.g. "OnPlayState" with `{"playState":4}`.
-     * The phone's UI (progress, quality, speed) is driven entirely by these.
+     * The phone's UI (progress, quality, speed) is driven entirely by these. [json] may be null
+     * for the ones that carry nothing ("PLAY_SUCCESS").
      */
-    fun broadcast(counter: Int, method: String, json: String): ByteArray {
+    fun broadcast(counter: Int, method: String, json: String?): ByteArray {
         val name = method.toByteArray(Charsets.UTF_8)
-        val body = json.toByteArray(Charsets.UTF_8)
-        val out = ByteArray(1 + 1 + 4 + 1 + 1 + 7 + 1 + name.size + 4 + body.size)
+        val body = json?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
+        // Kind 2 carries the command alone; kind 3 adds a 4-byte length and the JSON.
+        val payload = if (json == null) 0 else 4 + body.size
+        val out = ByteArray(1 + 1 + 4 + 1 + 1 + 7 + 1 + name.size + payload)
         var at = 0
         out[at++] = SEND.toByte()
-        out[at++] = 3
+        out[at++] = if (json == null) 2 else 3
         for (i in 0..3) out[at++] = intByte(counter, i)
         out[at++] = 1
         out[at++] = 7
         "Command".toByteArray(Charsets.UTF_8).copyInto(out, at); at += 7
         out[at++] = name.size.toByte()
         name.copyInto(out, at); at += name.size
-        for (i in 0..3) out[at++] = intByte(body.size, i)
-        body.copyInto(out, at)
+        if (json != null) {
+            for (i in 0..3) out[at++] = intByte(body.size, i)
+            body.copyInto(out, at)
+        }
         return out
     }
 

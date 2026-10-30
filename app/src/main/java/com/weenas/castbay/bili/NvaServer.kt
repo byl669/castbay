@@ -21,21 +21,44 @@ import java.util.concurrent.atomic.AtomicInteger
  * device and service descriptions over HTTP, and the control channel the phone opens with
  * `SETUP /projection NVA/1.0` before switching that same connection to binary frames.
  *
- * This build is a probe: it answers every command and writes what arrived, but does not fetch or
- * play anything. It exists to confirm against a real phone what the wire format actually is —
- * whether the TV appears under the phone's cast button, and what `Play` really carries — before
- * the playback path is built on top of it.
+ * The phone sends `Play` with the account's `accessKey`; this side fetches the streams
+ * ([BiliApi]), serves the timeline as a local MPD, plays it through [player], and reports
+ * progress, quality and state back once a second — the phone's own controls (progress bar,
+ * quality menu, speed) are drawn from those reports alone.
  */
-class NvaServer(
-    private val uuid: String,
-    private val friendlyName: () -> String
-) {
+class NvaServer(private val uuid: String, private val player: NvaPlayer) {
     private var server: ServerSocket? = null
     private var workers: ExecutorService? = null
 
     @Volatile private var running = false
 
     val port: Int get() = server?.localPort ?: 0
+
+    /** The MPD for what is playing now, or null when the API gave a single muxed file. */
+    @Volatile private var manifest: String? = null
+
+    /** Bumped for each new play, so the player reloads a manifest that changed behind its URL. */
+    @Volatile private var manifestVersion = 0
+
+    /** The control connection's writer, while a phone is connected: where reports go. */
+    @Volatile private var control: OutputStream? = null
+
+    private val sendCounter = AtomicInteger(0)
+
+    @Volatile private var current: Nva.PlayRequest? = null
+    @Volatile private var currentQn = 0
+
+    /** The height the phone is told about; [currentQn] is a quality id (80), not a resolution. */
+    @Volatile private var currentHeight = 0
+    @Volatile private var qualities: List<BiliApi.Quality> = emptyList()
+    @Volatile private var volume = 100
+
+    /** Kept so a quality switch carries the speed over instead of dropping back to 1x. */
+    @Volatile private var speed = 1f
+
+    /** The play state last reported, so only changes are sent. */
+    @Volatile private var reportedPlaying: Boolean? = null
+    @Volatile private var successSent = false
 
     /** Listens on [preferredPort] when free, else on any port; returns the one used. */
     fun start(preferredPort: Int = Nva.PORT): Int {
@@ -63,6 +86,7 @@ class NvaServer(
                 pool.execute { runCatching { serve(client) }.onFailure { Log.w(TAG, "Bilibili connection failed", it) } }
             }
         }, "Bili-nva-accept").apply { isDaemon = true }.start()
+        Thread({ reportLoop() }, "Bili-nva-report").apply { isDaemon = true }.start()
         return socket.localPort
     }
 
@@ -72,6 +96,28 @@ class NvaServer(
         server = null
         workers?.shutdownNow()
         workers = null
+        control = null
+        manifest = null
+        current = null
+    }
+
+    /** The phone stopped casting from elsewhere, or the TV did: tell it, and stop the picture. */
+    fun stopPlayback() {
+        player.stop()
+        manifest = null
+        current = null
+        reportedPlaying = null
+        successSent = false
+        broadcast("OnPlayState", """{"playState":7}""")
+    }
+
+    /**
+     * The video played to its end. The phone ends the episode on this and, with auto-next on,
+     * casts the next one by itself.
+     */
+    fun finished() {
+        reportedPlaying = null
+        broadcast("OnPlayState", """{"playState":6}""")
     }
 
     // ---- connections -------------------------------------------------------------------------
@@ -116,6 +162,8 @@ class NvaServer(
             output.write(Nva.handshake(session, uuid).toByteArray(Charsets.UTF_8))
             output.flush()
         }
+        // Reports go to the newest connection: a phone that reconnects takes over the screen.
+        control = output
         val counter = AtomicInteger(0)
         val stop = java.util.concurrent.atomic.AtomicBoolean(false)
         val pinger = Thread({
@@ -141,6 +189,7 @@ class NvaServer(
         } finally {
             stop.set(true)
             pinger.interrupt()
+            if (control === output) control = null
             Log.i(TAG, "Bilibili control channel closed ($from)")
         }
     }
@@ -170,14 +219,238 @@ class NvaServer(
         }
     }
 
-    /** Answers a command so the phone never waits, and writes what it said. */
+    /** Answers a command (the phone waits for the reply before its next one) and acts on it. */
     private fun handle(command: Nva.Command, output: OutputStream, counter: AtomicInteger) {
         Log.i(TAG, "Bilibili → ${command.method} ${describe(command)}")
-        val reply = when (command.method) {
-            "GetVolume" -> Nva.reply(command.counter, """{"volume":0}""")
-            else -> Nva.ack(command.counter)
+        when (command.method) {
+            "Play" -> {
+                send(output, Nva.ack(command.counter))
+                onPlay(command.payload)
+            }
+            "PlayUrl" -> send(output, Nva.ack(command.counter))
+            "Pause" -> {
+                send(output, Nva.ack(command.counter))
+                player.setPaused(true)
+                reportState(playing = false)
+            }
+            "Resume" -> {
+                send(output, Nva.ack(command.counter))
+                player.setPaused(false)
+                reportState(playing = true)
+            }
+            "Seek" -> {
+                send(output, Nva.ack(command.counter))
+                val seconds = number(command.payload, "seekTs")?.toInt() ?: 0
+                player.seekTo(seconds.coerceAtLeast(0))
+            }
+            "Stop" -> {
+                send(output, Nva.ack(command.counter))
+                player.stop()
+                manifest = null
+                reportedPlaying = null
+                reportState(playing = false, stopped = true)
+            }
+            "SetVolume" -> {
+                send(output, Nva.ack(command.counter))
+                number(command.payload, "volume")?.let { value ->
+                    volume = value.toInt().coerceIn(0, 100)
+                    player.setVolume(volume)
+                }
+            }
+            "GetVolume" -> send(output, Nva.reply(command.counter, """{"volume":$volume}"""))
+            "SwitchSpeed" -> {
+                send(output, Nva.ack(command.counter))
+                val rate = (number(command.payload, "speed")?.toFloat() ?: 1f).coerceIn(0.25f, 3f)
+                Log.i(TAG, "Bilibili speed ${rate}x")
+                speed = rate
+                player.setSpeed(rate)
+                broadcast("SpeedChanged", speedJson(rate))
+            }
+            "SwitchQn" -> {
+                send(output, Nva.ack(command.counter))
+                val qn = number(command.payload, "qn")?.toInt() ?: 0
+                if (qn > 0) switchQuality(qn)
+            }
+            // Danmaku is not drawn on the TV yet: acknowledged, and reported as closed so the
+            // phone's switch matches what is on screen.
+            "SwitchDanmaku", "SendDanmaku", "AppendDanmaku", "SetDanmakuSwitch" ->
+                send(output, Nva.ack(command.counter))
+            else -> send(output, Nva.ack(command.counter))
         }
-        send(output, reply)
+    }
+
+    private fun onPlay(payload: String?) {
+        val request = Nva.PlayRequest.parse(payload) ?: return
+        val previous = current
+        current = request
+        if (!request.open) {
+            Log.i(TAG, "Bilibili pause (Play with isOpen false)")
+            player.setPaused(true)
+            reportState(playing = false)
+            return
+        }
+        // The same video again with nothing stopped: the phone's resume, not a new cast.
+        val same = previous != null && previous.aid == request.aid && previous.cid == request.cid
+        if (same && player.progress() != null) {
+            Log.i(TAG, "Bilibili resume")
+            player.setPaused(false)
+            reportState(playing = true)
+            return
+        }
+        if (request.isLive) {
+            Log.i(TAG, "Bilibili live room ${request.roomId} is not supported yet")
+            broadcast("OnPlayState", """{"playState":7}""")
+            return
+        }
+        Log.i(
+            TAG,
+            "Bilibili cast: aid ${request.aid} cid ${request.cid} epid ${request.epid} " +
+                "from ${request.startSec} s, asking qn ${request.qn}"
+        )
+        open(request)
+    }
+
+    /** Fetches the streams off the protocol thread, then hands the player the manifest. */
+    private fun open(request: Nva.PlayRequest) {
+        Thread({
+            try {
+                broadcast("OnPlayState", """{"playState":3}""")
+                val stream = BiliApi.request(
+                    aid = request.aid, cid = request.cid, epid = request.epid,
+                    accessKey = request.accessKey, qn = BiliApi.WANTED_QN
+                )
+                currentQn = stream.video.id
+                currentHeight = stream.video.height
+                qualities = stream.qualities
+                speed = request.speed
+                successSent = false
+                val source = localSource(stream)
+                player.play(
+                    manifest = source,
+                    startSec = request.startSec,
+                    durationSec = (stream.durationMs / 1000).toInt(),
+                    title = "Bilibili ${stream.video.height}p",
+                    qn = stream.video.id,
+                    speed = request.speed
+                )
+                broadcast("OnEpisodeSwitch", episodeJson(request))
+                broadcast("OnQnSwitch", qnJson())
+                broadcast("SpeedChanged", speedJson(request.speed))
+                broadcast("OnDanmakuSwitch", """{"open":false}""")
+            } catch (failure: BiliApi.Failure) {
+                Log.e(TAG, "Bilibili could not play aid ${request.aid}: ${failure.message}")
+                broadcast("OnPlayState", """{"playState":7}""")
+            } catch (error: Exception) {
+                Log.e(TAG, "Bilibili playback failed", error)
+                broadcast("OnPlayState", """{"playState":7}""")
+            }
+        }, "Bili-nva-play").start()
+    }
+
+    /** A quality picked in the phone's menu: fetch that qn and carry on where it was. */
+    private fun switchQuality(qn: Int) {
+        val request = current ?: return
+        val position = player.progress()?.positionSec ?: 0
+        Log.i(TAG, "Bilibili quality switch to qn $qn at ${position} s")
+        Thread({
+            try {
+                val stream = BiliApi.request(request.aid, request.cid, request.epid, request.accessKey, qn)
+                currentQn = stream.video.id
+                currentHeight = stream.video.height
+                qualities = stream.qualities
+                successSent = false
+                val source = localSource(stream)
+                player.play(
+                    manifest = source,
+                    startSec = position,
+                    durationSec = (stream.durationMs / 1000).toInt(),
+                    title = "Bilibili ${stream.video.height}p",
+                    qn = stream.video.id,
+                    speed = speed
+                )
+                broadcast("OnQnSwitch", qnJson())
+            } catch (error: Exception) {
+                Log.e(TAG, "Bilibili could not switch quality to $qn", error)
+            }
+        }, "Bili-nva-quality").start()
+    }
+
+    /**
+     * What the player should open: this server's MPD when there is one (served from 127.0.0.1,
+     * so no network interface has to be up), else the single muxed file the API gave.
+     */
+    private fun localSource(stream: BiliApi.Stream): String {
+        val single = stream.single
+        if (single != null) {
+            manifest = null
+            return single
+        }
+        manifest = BiliApi.buildMpd(stream)
+        manifestVersion++
+        return "http://127.0.0.1:$port$MANIFEST_PATH?v=$manifestVersion"
+    }
+
+    /**
+     * The phone's progress bar, play/pause state and quality label come from these reports:
+     * without them it shows 00:00 / 00:00 and its own pause button does nothing.
+     */
+    private fun reportLoop() {
+        while (running) {
+            try {
+                Thread.sleep(REPORT_INTERVAL_MS)
+            } catch (interrupted: InterruptedException) {
+                break
+            }
+            if (control == null) continue
+            val progress = player.progress() ?: continue
+            if (progress.durationSec <= 0) continue
+            broadcast(
+                "OnProgress",
+                """{"duration":${progress.durationSec},"position":${progress.positionSec}}"""
+            )
+            if (reportedPlaying != progress.playing) {
+                reportState(progress.playing)
+                if (progress.playing && !successSent) {
+                    successSent = true
+                    broadcast("PLAY_SUCCESS", null)
+                }
+            }
+        }
+    }
+
+    private fun reportState(playing: Boolean, stopped: Boolean = false) {
+        reportedPlaying = if (stopped) null else playing
+        val state = when {
+            stopped -> 7
+            playing -> 4
+            else -> 5
+        }
+        broadcast("OnPlayState", """{"playState":$state}""")
+    }
+
+    private fun episodeJson(request: Nva.PlayRequest): String = buildString {
+        append("""{"playItem":{"aid":${request.aid},"cid":${request.cid},"contentType":${request.contentType}""")
+        append(""","epId":${request.epid},"seasonId":${request.seasonId}}""")
+        append(""","qnDesc":${qnJson()},"title":"Bilibili ${currentHeight}p"}""")
+    }
+
+    private fun qnJson(): String = buildString {
+        append("""{"curQn":$currentQn,"userDesireQn":$currentQn,"supportQnList":[""")
+        append(
+            qualities.joinToString(",") { quality ->
+                """{"quality":${quality.qn},"description":"${quality.description}","displayDesc":"${quality.description}",""" +
+                    """"needVip":${quality.needVip},"needLogin":${quality.needLogin},"superscript":""}"""
+            }
+        )
+        append("]}")
+    }
+
+    private fun speedJson(speed: Float): String =
+        """{"currSpeed":$speed,"supportSpeedList":[0.5,0.75,1.0,1.25,1.5,2.0]}"""
+
+    private fun broadcast(method: String, json: String?) {
+        val out = control ?: return
+        send(out, Nva.broadcast(sendCounter.incrementAndGet(), method, json))
     }
 
     private fun send(output: OutputStream, bytes: ByteArray) {
@@ -189,7 +462,7 @@ class NvaServer(
         }.onFailure { Log.w(TAG, "Could not answer Bilibili", it) }
     }
 
-    // ---- HTTP (descriptions and SOAP) --------------------------------------------------------
+    // ---- HTTP (descriptions, SOAP and the local manifest) -------------------------------------
 
     private fun respond(
         socket: Socket,
@@ -202,9 +475,18 @@ class NvaServer(
     ) {
         val service = UpnpDescriptions.SERVICES.firstOrNull { path.startsWith("/${it.name}/") }
         when {
+            path == MANIFEST_PATH -> {
+                val mpd = manifest
+                if (mpd == null) {
+                    write(socket, output, 404, "Not Found", "")
+                } else {
+                    Log.i(TAG, "Bilibili manifest served to the player (${mpd.length} bytes)")
+                    write(socket, output, 200, "OK", mpd, contentType = "application/dash+xml; charset=\"utf-8\"")
+                }
+            }
             path == Nva.DESCRIPTION_PATH || path == UpnpDescriptions.DESCRIPTION_PATH -> {
                 Log.i(TAG, "Bilibili asked for the device description from $from (${headers["user-agent"].orEmpty()})")
-                write(socket, output, 200, "OK", Nva.device(friendlyName(), uuid))
+                write(socket, output, 200, "OK", Nva.device(uuid))
             }
             path == Nva.NIRVANA_SCPD -> write(socket, output, 200, "OK", Nva.SCPD)
             service != null && path == service.scpdPath -> write(socket, output, 200, "OK", UpnpDescriptions.scpd(service))
@@ -230,14 +512,15 @@ class NvaServer(
         status: Int,
         reason: String,
         body: String,
-        headers: List<Pair<String, String>> = emptyList()
+        headers: List<Pair<String, String>> = emptyList(),
+        contentType: String = "text/xml; charset=\"utf-8\""
     ) {
         val bytes = body.toByteArray(Charsets.UTF_8)
         val head = buildString {
             append("HTTP/1.1 $status $reason\r\n")
             append("Server: ${Nva.SERVER}\r\n")
             append("Content-Length: ${bytes.size}\r\n")
-            if (bytes.isNotEmpty()) append("Content-Type: text/xml; charset=\"utf-8\"\r\n")
+            if (bytes.isNotEmpty()) append("Content-Type: $contentType\r\n")
             headers.forEach { (name, value) -> append("$name: $value\r\n") }
             append("Date: ${Nva.httpDate()}\r\n")
             append("Connection: close\r\n\r\n")
@@ -259,7 +542,7 @@ class NvaServer(
 
     private fun soapResponse(action: String, serviceType: String): String {
         val args = when (action) {
-            // Values a stock box reports; the probe only needs the phone to get past this step.
+            // Values a stock box reports; the phone only needs to get past this step.
             "GetAppInfo" -> "<PackageName>com.xiaodianshi.tv.yst</PackageName><AppKey>0000000000000000</AppKey>" +
                 "<Signature>0000000000000000</Signature><CurrentSignedIn>1</CurrentSignedIn>"
             "GetAccountInfo" -> "<VipInfo>0</VipInfo>"
@@ -314,6 +597,13 @@ class NvaServer(
         }
     }
 
+    /** One number out of a command payload, without building a whole parser. */
+    private fun number(payload: String?, name: String): Double? {
+        val text = payload ?: return null
+        val match = Regex("\"$name\"\\s*:\\s*(-?[0-9.]+)").find(text) ?: return null
+        return match.groupValues[1].toDoubleOrNull()
+    }
+
     // ---- logging -----------------------------------------------------------------------------
 
     /**
@@ -343,9 +633,11 @@ class NvaServer(
         const val TAG = "CastBayBili"
         const val READ_TIMEOUT_MS = 10_000
         const val PING_INTERVAL_MS = 1_000L
+        const val REPORT_INTERVAL_MS = 1_000L
         const val MAX_LINE_BYTES = 8 * 1024
         const val MAX_BODY_BYTES = 256 * 1024
         const val MAX_FRAME_BYTES = 512 * 1024
         const val MAX_LOG_BYTES = 1_200
+        const val MANIFEST_PATH = "/bili/manifest.mpd"
     }
 }
