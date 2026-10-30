@@ -1,6 +1,7 @@
 package com.weenas.castbay.service
 
 import android.content.Context
+import android.net.wifi.WifiManager
 import com.weenas.castbay.util.Log
 import com.weenas.castbay.util.UsageStats
 import android.view.Surface
@@ -11,6 +12,7 @@ class AirPlayManager private constructor(private val context: Context) {
 
     companion object {
         private const val TAG = "AirPlayManager"
+        private const val MULTICAST_LOCK_TAG = "castbay-discovery"
         private const val DEFAULT_VIDEO_WIDTH = 1920
         private const val DEFAULT_VIDEO_HEIGHT = 1080
         private const val PAUSE_CHECK_MS = 500L
@@ -495,6 +497,9 @@ class AirPlayManager private constructor(private val context: Context) {
     /** The native AirPlay listener's port from the latest start; null when it didn't start. */
     @Volatile private var listenerPort: Int? = null
 
+    /** Held while the receiver runs: without it the Wi-Fi chipset drops every multicast frame. */
+    private var multicastLock: WifiManager.MulticastLock? = null
+
     /** What the Diagnostics network check needs; reading it changes nothing. */
     data class ReceiverSnapshot(
         val state: AirPlayConnectionState,
@@ -517,6 +522,7 @@ class AirPlayManager private constructor(private val context: Context) {
 
     fun start(settings: ReceiverSettings = settingsStore.load()): Boolean {
         Log.d(TAG, "Starting AirPlay server: ${settings.advertisedName}")
+        holdMulticast()
         // Already up (the app started it without the service, or the service asks a second time).
         if (currentState != AirPlayConnectionState.Idle && currentState != AirPlayConnectionState.Error) {
             Log.d(TAG, "The receiver is already running")
@@ -569,13 +575,16 @@ class AirPlayManager private constructor(private val context: Context) {
         currentState = AirPlayConnectionState.Registering
         mainHandler.removeCallbacks(startupWatchdog)
         mainHandler.postDelayed(startupWatchdog, STARTUP_TIMEOUT_MS)
-        // DLNA (video apps' own cast buttons, e.g. Bilibili's) runs beside AirPlay.
-        if (settings.dlnaEnabled) Thread({ dlna.start(settings.advertisedName, dlnaTarget) }, "DLNA-start").start()
+        // DLNA (video apps' own cast buttons, e.g. Bilibili's) runs beside AirPlay. Bilibili's own
+        // protocol ("哔哩必连") starts right after it and answers through the same SSDP socket: the
+        // phone hands over its account key, so a cast is not held to DLNA's 720p, but two sockets
+        // on port 1900 would split the searches and leave one of them looking offline.
+        if (settings.dlnaEnabled) Thread({
+            dlna.start(settings.advertisedName, dlnaTarget)
+            bili.start(settings.advertisedName, biliPlayer, dlna.ssdpServer())
+        }, "DLNA-start").start()
         // Plex (the official app's "play to device") runs beside AirPlay and DLNA; a failure only logs.
         if (settings.dlnaEnabled) Thread({ plex.start(settings.advertisedName) }, "Plex-start").start()
-        // Bilibili's own cast protocol ("哔哩必连"): the phone hands over its account key and the
-        // TV fetches the stream itself, so a cast is not held to DLNA's 720p.
-        if (settings.dlnaEnabled) Thread({ bili.start(settings.advertisedName, biliPlayer) }, "Bili-start").start()
         // CastBay Desktop: computers casting over CastBay Link.
         if (settings.desktopEnabled) {
             Thread({
@@ -629,6 +638,34 @@ class AirPlayManager private constructor(private val context: Context) {
         _pairingPin.value = null
     }
 
+    /**
+     * Discovery runs on multicast (SSDP on 239.255.255.250, mDNS on 224.0.0.251). Android's Wi-Fi
+     * stack drops frames addressed to a group nobody asked for unless an app holds this lock, so
+     * without it the phone's search never arrives and the receiver never appears in its cast list
+     * — even though its sockets are bound and the network answers pings.
+     */
+    private fun holdMulticast() {
+        if (multicastLock != null) return
+        val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+        if (wifi == null) {
+            Log.w(TAG, "No Wi-Fi service: discovery may not be visible on the local network")
+            return
+        }
+        multicastLock = runCatching {
+            wifi.createMulticastLock(MULTICAST_LOCK_TAG).apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }.onFailure { Log.w(TAG, "Could not hold the Wi-Fi multicast lock", it) }.getOrNull()
+        Log.i(TAG, "Wi-Fi multicast lock ${if (multicastLock == null) "unavailable" else "held"}")
+    }
+
+    private fun releaseMulticast() {
+        val lock = multicastLock ?: return
+        multicastLock = null
+        runCatching { lock.release() }
+    }
+
     fun stop() {
         Log.d(TAG, "Stopping AirPlay server")
         mainHandler.removeCallbacks(startupWatchdog)
@@ -641,6 +678,7 @@ class AirPlayManager private constructor(private val context: Context) {
         bili.stop()
         linkDiscovery.stop()
         linkServer.stop()
+        releaseMulticast()
         desktopSession = null
         desktopSenderId = ""
         videoRenderer.stop()

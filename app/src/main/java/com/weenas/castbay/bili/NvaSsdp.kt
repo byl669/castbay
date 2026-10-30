@@ -1,6 +1,7 @@
 package com.weenas.castbay.bili
 
 import com.weenas.castbay.dlna.Ssdp
+import com.weenas.castbay.dlna.SsdpServer
 import com.weenas.castbay.util.Log
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -24,12 +25,31 @@ class NvaSsdp(private val uuid: String, private val port: () -> Int) {
     private var listener: MulticastSocket? = null
     private var sender: MulticastSocket? = null
 
-    /** Whether searches can be received; if not, the periodic announcements still advertise us. */
+    /** Set while answering through a renderer's socket rather than one of our own. */
+    private var hostServer: SsdpServer? = null
+    private var guest: SsdpServer.Guest? = null
+
+    /**
+     * Whether searches can be received; if not, the periodic announcements still advertise us.
+     *
+     * When [host] is given this receiver joins that renderer's socket instead of binding a second
+     * one on 1900: two sockets there split the unicast searches, and whichever loses a packet
+     * makes this device show up as offline in the phone's list. The host also announces us.
+     */
     var answersSearches = false
         private set
 
-    fun start() {
+    fun start(host: SsdpServer? = null) {
         running = true
+        if (host != null) {
+            val shared = SsdpServer.Guest({ port() }, Nva.DESCRIPTION_PATH) { Nva.targets(uuid) }
+            host.addGuest(shared)
+            hostServer = host
+            guest = shared
+            answersSearches = true
+            Log.i(TAG, "Bilibili discovery shares the DLNA socket on ${Ssdp.PORT}")
+            return
+        }
         sender = MulticastSocket().apply { timeToLive = 4 }
         answersSearches = try {
             val socket = MulticastSocket(null).apply {
@@ -55,6 +75,9 @@ class NvaSsdp(private val uuid: String, private val port: () -> Int) {
     fun stop() {
         if (!running) return
         running = false
+        guest?.let { shared -> hostServer?.removeGuest(shared) }
+        guest = null
+        hostServer = null
         runCatching { announce { target, location -> Ssdp.byeBye(target) } }
         runCatching { listener?.close() }
         runCatching { sender?.close() }
@@ -136,6 +159,10 @@ class NvaSsdp(private val uuid: String, private val port: () -> Int) {
 
     private companion object {
         const val TAG = "CastBayBili"
-        const val ANNOUNCE_INTERVAL_MS = 30_000L
+        /**
+         * Phones rebuild their cast list from search replies, but a list already open only keeps
+         * what it last heard, so the announcement is repeated often enough to undo a missed reply.
+         */
+        const val ANNOUNCE_INTERVAL_MS = 10_000L
     }
 }

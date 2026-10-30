@@ -23,6 +23,31 @@ class SsdpServer(private val uuid: String, private val httpPort: () -> Int) {
     private var listener: MulticastSocket? = null
     private var sender: MulticastSocket? = null
 
+    /**
+     * A second receiver answering through this socket.
+     *
+     * Two sockets bound to 1900 with address reuse are legal, but a search is delivered to only
+     * one of them. The loser hears nothing but multicast, so every search it misses makes the
+     * other device look offline; sharing one socket removes the coin toss.
+     */
+    class Guest(
+        val port: () -> Int,
+        val path: String,
+        val targets: () -> List<Pair<String, String>>
+    )
+
+    private val guests = java.util.concurrent.CopyOnWriteArrayList<Guest>()
+
+    /** Registers another receiver; add it before [start] so the first announcement carries it. */
+    fun addGuest(guest: Guest) {
+        if (guests.none { it === guest }) guests.add(guest)
+    }
+
+    /** Takes a guest back out, for a receiver that stops while this server keeps running. */
+    fun removeGuest(guest: Guest) {
+        guests.removeAll { it === guest }
+    }
+
     /** Whether M-SEARCH requests can be received (port 1900 could be bound). */
     var answersSearches = false
         private set
@@ -71,17 +96,30 @@ class SsdpServer(private val uuid: String, private val httpPort: () -> Int) {
                 break
             }
             val search = Ssdp.parseSearch(String(packet.data, 0, packet.length, Charsets.UTF_8)) ?: continue
-            val targets = Ssdp.matches(search, uuid)
-            if (targets.isEmpty()) continue
-            val sender = InetSocketAddress(packet.address, packet.port)
-            Log.d(TAG, "M-SEARCH ${search.searchTarget} from ${packet.address.hostAddress}")
-            reply(sender, targets)
+            val to = InetSocketAddress(packet.address, packet.port)
+            devices().forEach { device ->
+                val targets = matching(search.searchTarget, device.targets())
+                if (targets.isEmpty()) return@forEach
+                Log.d(TAG, "M-SEARCH ${search.searchTarget} from ${packet.address.hostAddress}")
+                reply(device, to, targets)
+            }
         }
     }
 
-    private fun reply(to: InetSocketAddress, targets: List<Pair<String, String>>) {
+    /** This renderer, plus every guest that answers on the same socket. */
+    private fun devices(): List<Guest> =
+        listOf(Guest({ httpPort() }, UpnpDescriptions.DESCRIPTION_PATH) { Ssdp.targets(uuid) }) + guests
+
+    private fun matching(searchTarget: String, all: List<Pair<String, String>>): List<Pair<String, String>> =
+        if (searchTarget.equals("ssdp:all", ignoreCase = true)) {
+            all
+        } else {
+            all.filter { it.first.equals(searchTarget, ignoreCase = true) }
+        }
+
+    private fun reply(device: Guest, to: InetSocketAddress, targets: List<Pair<String, String>>) {
         val local = localAddressFor(to.address) ?: return
-        val location = location(local)
+        val location = location(device, local)
         runCatching {
             DatagramSocket().use { socket ->
                 targets.forEach { target ->
@@ -108,15 +146,18 @@ class SsdpServer(private val uuid: String, private val httpPort: () -> Int) {
         val group = InetSocketAddress(InetAddress.getByName(Ssdp.ADDRESS), Ssdp.PORT)
         interfaces().forEach { (network, address) ->
             socket.networkInterface = network
-            Ssdp.targets(uuid).forEach { target ->
-                val bytes = message(target, location(address)).toByteArray(Charsets.UTF_8)
-                socket.send(DatagramPacket(bytes, bytes.size, group))
+            devices().forEach { device ->
+                val location = location(device, address)
+                device.targets().forEach { target ->
+                    val bytes = message(target, location).toByteArray(Charsets.UTF_8)
+                    socket.send(DatagramPacket(bytes, bytes.size, group))
+                }
             }
         }
     }
 
-    private fun location(address: InetAddress) =
-        "http://${address.hostAddress}:${httpPort()}${UpnpDescriptions.DESCRIPTION_PATH}"
+    private fun location(device: Guest, address: InetAddress) =
+        "http://${address.hostAddress}:${device.port()}${device.path}"
 
     /** Our address on the network that reaches [remote]. */
     private fun localAddressFor(remote: InetAddress): InetAddress? = runCatching {

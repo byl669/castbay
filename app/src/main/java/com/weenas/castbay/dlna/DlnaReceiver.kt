@@ -53,6 +53,12 @@ class DlnaReceiver(context: Context) {
     }
 
     /**
+     * The SSDP listener the renderer answers on, for another receiver to share: a second socket
+     * on port 1900 would only get the unicast searches it happens to win.
+     */
+    fun ssdpServer(): SsdpServer? = ssdp
+
+    /**
      * Accepts every command and only reports it, for trying the protocol against real apps
      * before playback is wired up.
      */

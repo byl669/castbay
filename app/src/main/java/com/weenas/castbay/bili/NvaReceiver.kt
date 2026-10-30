@@ -1,6 +1,7 @@
 package com.weenas.castbay.bili
 
 import android.content.Context
+import com.weenas.castbay.dlna.SsdpServer
 import com.weenas.castbay.util.Log
 import java.util.UUID
 
@@ -26,7 +27,7 @@ class NvaReceiver(context: Context) {
     }
 
     @Synchronized
-    fun start(name: String, player: NvaPlayer) {
+    fun start(name: String, player: NvaPlayer, discoveryHost: SsdpServer? = null) {
         stop()
         val advertised = name.trim().ifBlank { "CastBay" }
         val nva = NvaServer(uuid, player)
@@ -34,7 +35,7 @@ class NvaReceiver(context: Context) {
             // The same port as last time when it is free: an NVA device is addressed by it.
             val port = nva.start(preferences.getInt(KEY_PORT, Nva.PORT))
             preferences.edit().putInt(KEY_PORT, port).apply()
-            val discovery = NvaSsdp(uuid) { nva.port }.also { it.start() }
+            val discovery = NvaSsdp(uuid) { nva.port }.also { it.start(discoveryHost) }
             server = nva
             ssdp = discovery
             Log.i(TAG, "Bilibili receiver \"$advertised\" advertised as \"${Nva.DEVICE_NAME}\" on port $port (uuid $uuid)")
