@@ -98,13 +98,18 @@ Bilibili → SwitchQn {"qn":112}        → quality switch at 3485 s
 * **Quality stops where the account stops.** Asking for qn 112 (1080P+) on a non-VIP account
   returns qn 80; the reply reports the qn that was actually granted, so the phone's menu snaps
   back to what is playing instead of lying.
-* **Danmaku is not drawn.** The switch is acknowledged and reported as off, so the phone's own
-  toggle matches the screen. Rendering it needs the ASS/subtitle path.
-* **No live rooms yet.** `Play` with a live `roomId` is answered with a failure state.
+* **Danmaku is not drawn.** Its switch is acknowledged and reported as off so the phone's toggle
+  matches the screen. Not planned: the cast is wanted for its picture, not its overlay.
+* **No live rooms.** `Play` with a live `roomId` is answered with a failure state. Not planned.
 * Port 9958 is shared with the official app; only one of them can run.
 * It starts and stops with the DLNA setting, next to the Plex receiver.
 
-## Next step
+## Note on discovery
 
-Danmaku (fetch `/x/v1/dm/list.so?oid=<cid>`, convert to ASS, feed the existing subtitle
-pipeline) and live rooms (`/xlive/web-room/v1/playUrl`, an HLS variant instead of DASH).
+Bilibili's receiver answers through the DLNA renderer's SSDP socket rather than binding its own
+on 1900: two sockets there both bind, but a search is delivered to only one of them, so the other
+answers multicast alone and shows up as offline whenever a packet is lost.
+
+If the phone lists the TV as offline while its ports are open, check the phone before the code —
+a VPN or a proxy in TUN mode eats 224.0.0.0/4 (a TUN interface has no link-layer multicast),
+even when the app in question is on the proxy's direct list.

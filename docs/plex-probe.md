@@ -64,3 +64,10 @@ storage in a debug build (`adb pull /sdcard/Android/data/com.weenas.castbay.debu
 
 - No decoding: `playMedia` is recorded, not played.
 - No `X-Plex-Token` storage: the token is used when it arrives, never written down.
+
+## Status: stopped
+
+The Plex Android app removed its Companion cast entry point in the New Plex Experience
+(2026.21.0) — its log shows it never searches for a receiver, only the server does. This
+receiver therefore has nothing to answer and is kept only as a reference: the probe code is
+still there and still runs, but no further work goes into it.

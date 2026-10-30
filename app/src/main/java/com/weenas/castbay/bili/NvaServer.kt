@@ -34,8 +34,14 @@ class NvaServer(private val uuid: String, private val player: NvaPlayer) {
 
     val port: Int get() = server?.localPort ?: 0
 
-    /** The MPD for what is playing now, or null when the API gave a single muxed file. */
-    @Volatile private var manifest: String? = null
+    /**
+     * The MPD for what is playing now, or null when the API gave a single muxed file.
+     * Kept with its version: the player may retry a URL from a previous cast, and answering that
+     * with the current timeline is how a half-old manifest reaches the XML parser.
+     */
+    private class Manifest(val version: Int, val body: String)
+
+    @Volatile private var manifest: Manifest? = null
 
     /** Bumped for each new play, so the player reloads a manifest that changed behind its URL. */
     @Volatile private var manifestVersion = 0
@@ -131,7 +137,9 @@ class NvaServer(private val uuid: String, private val player: NvaPlayer) {
             val parts = requestLine.split(' ')
             if (parts.size < 3) return
             val method = parts[0].uppercase()
-            val path = parts[1].substringBefore('?')
+            val target = parts[1]
+            val path = target.substringBefore('?')
+            val query = target.substringAfter('?', "")
             val protocol = parts[2]
             val headers = readHeaders(input)
             val from = socket.inetAddress.hostAddress.orEmpty()
@@ -141,7 +149,7 @@ class NvaServer(private val uuid: String, private val player: NvaPlayer) {
                 return
             }
             val body = readBody(input, headers)
-            respond(socket, output, method, path, headers, body, from)
+            respond(socket, output, method, path, query, headers, body, from)
         }
     }
 
@@ -385,9 +393,10 @@ class NvaServer(private val uuid: String, private val player: NvaPlayer) {
             manifest = null
             return single
         }
-        manifest = BiliApi.buildMpd(stream)
-        manifestVersion++
-        return "http://127.0.0.1:$port$MANIFEST_PATH?v=$manifestVersion"
+        val version = manifestVersion + 1
+        manifestVersion = version
+        manifest = Manifest(version, BiliApi.buildMpd(stream))
+        return "http://127.0.0.1:$port$MANIFEST_PATH?v=$version"
     }
 
     /**
@@ -469,6 +478,7 @@ class NvaServer(private val uuid: String, private val player: NvaPlayer) {
         output: OutputStream,
         method: String,
         path: String,
+        query: String,
         headers: Map<String, String>,
         body: String,
         from: String
@@ -476,12 +486,21 @@ class NvaServer(private val uuid: String, private val player: NvaPlayer) {
         val service = UpnpDescriptions.SERVICES.firstOrNull { path.startsWith("/${it.name}/") }
         when {
             path == MANIFEST_PATH -> {
+                val wanted = query.split('&')
+                    .firstOrNull { it.startsWith("v=") }?.substringAfter("v=")?.toIntOrNull()
                 val mpd = manifest
                 if (mpd == null) {
                     write(socket, output, 404, "Not Found", "")
                 } else {
-                    Log.i(TAG, "Bilibili manifest served to the player (${mpd.length} bytes)")
-                    write(socket, output, 200, "OK", mpd, contentType = "application/dash+xml; charset=\"utf-8\"")
+                    if (wanted != null && wanted != mpd.version) {
+                        Log.i(TAG, "Bilibili manifest v$wanted asked for; v${mpd.version} is current")
+                    }
+                    Log.i(TAG, "Bilibili manifest served to the player (${mpd.body.length} bytes)")
+                    write(
+                        socket, output, 200, "OK", mpd.body,
+                        headers = listOf("Cache-Control" to "no-store"),
+                        contentType = "application/dash+xml; charset=\"utf-8\""
+                    )
                 }
             }
             path == Nva.DESCRIPTION_PATH || path == UpnpDescriptions.DESCRIPTION_PATH -> {

@@ -136,7 +136,7 @@ public final class PlexGdm implements AutoCloseable {
         Integer previous = seen.get(key);
         int count = previous == null ? 1 : previous.intValue() + 1;
         seen.put(key, Integer.valueOf(count));
-        if (count == 1 || count % 10 == 0) {
+        if (count == 1 || count % 100 == 0) {
             log.write("[Plex] Plex App 正在搜索设备，已应答：" + key + (count == 1 ? "" : "，第 " + count + " 次"));
         }
     }
