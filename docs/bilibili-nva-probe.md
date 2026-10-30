@@ -68,16 +68,43 @@ Bilibili → Play {"aid":80433022,"cid":137649199,"qn":80,"userDesireQn":80,"acc
 
 The `accessKey` is always masked: it is the account's credential and never needs to be in a log.
 
+## What plays now
+
+The `Play` command is answered in full:
+
+1. `/x/tv/playurl` is called with the phone's `accessKey` and `fnval=4048`, so the reply is DASH
+   rather than the 720p muxed `durl` a plain DLNA renderer gets.
+2. A track is picked: `avc1` first (the client's decoder handles HEVC poorly), highest height at
+   or below 1080p.
+3. The two tracks are wrapped in a small static MPD (`profiles="isoff-on-demand"`, one
+   `SegmentBase` with `indexRange` plus `Initialization` per track) and served from this port, so
+   `http://127.0.0.1:9958/bili/manifest.mpd` needs no network interface to be up and ExoPlayer
+   can seek inside a ten-minute video without downloading it first.
+4. The phone is told what happened through the control channel — `OnPlayState`, `OnProgress`
+   (once a second), `OnQnSwitch`, `OnEpisodeSwitch`, `SpeedChanged`, `PLAY_SUCCESS`. Its progress
+   bar, quality menu and speed slider are drawn from these alone.
+
+Measured on a Nubia tablet (Android 13) with a phone on the same Wi-Fi:
+
+```
+Bilibili cast: aid 116985195143005 cid 40310997685 from 3456 s, asking qn 64
+Bilibili stream: 1920x1080 avc1.640033 qn 80 · audio 30280 · 5041 s · account quality 64
+Bilibili → SwitchSpeed {"speed":1.5}  → speed 1.5x
+Bilibili → SwitchQn {"qn":112}        → quality switch at 3485 s
+```
+
 ## Known limits of this build
 
-* Nothing plays. `Play` is acknowledged, then silence, so the phone shows its loading state.
+* **Quality stops where the account stops.** Asking for qn 112 (1080P+) on a non-VIP account
+  returns qn 80; the reply reports the qn that was actually granted, so the phone's menu snaps
+  back to what is playing instead of lying.
+* **Danmaku is not drawn.** The switch is acknowledged and reported as off, so the phone's own
+  toggle matches the screen. Rendering it needs the ASS/subtitle path.
+* **No live rooms yet.** `Play` with a live `roomId` is answered with a failure state.
 * Port 9958 is shared with the official app; only one of them can run.
 * It starts and stops with the DLNA setting, next to the Plex receiver.
 
-## Next step (not in this build)
+## Next step
 
-Once the frames are confirmed: call `/x/tv/playurl` with the phone's `accessKey` and
-`fnval=4048` for DASH, build a minimal MPD (`SegmentBase` + byte ranges — Bilibili serves one
-fragmented file per track, and it carries an `sidx`), serve it on this port, and play it with the
-existing ExoPlayer path. Danmaku becomes an ASS subtitle through the existing subtitle pipeline;
-speed needs one call (`setPlaybackSpeed`) that the current player lacks.
+Danmaku (fetch `/x/v1/dm/list.so?oid=<cid>`, convert to ASS, feed the existing subtitle
+pipeline) and live rooms (`/xlive/web-room/v1/playUrl`, an HLS variant instead of DASH).
