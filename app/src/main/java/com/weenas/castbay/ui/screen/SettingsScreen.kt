@@ -317,6 +317,11 @@ private fun ColumnScope.GeneralPage(
         viewModel.updateSettings { it.copy(language = language) }
         onLanguageChanged()
     }
+    CardDivider()
+    SwitchSetting(stringResource(R.string.setting_start_on_boot), settings.startOnBoot) { enabled ->
+        viewModel.updateSettings { it.copy(startOnBoot = enabled) }
+    }
+    Text(stringResource(R.string.setting_start_on_boot_note), color = Color.Gray, fontSize = 14.sp)
     // Store builds (F-Droid) are updated by the store, so they don't look for updates themselves.
     if (BuildConfig.SELF_UPDATE) {
         CardDivider()

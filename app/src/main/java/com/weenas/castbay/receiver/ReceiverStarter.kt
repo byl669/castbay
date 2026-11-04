@@ -3,8 +3,8 @@ package com.weenas.castbay.receiver
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
-import com.weenas.castbay.BuildConfig
 import com.weenas.castbay.service.AirPlayService
+import com.weenas.castbay.service.ReceiverSettingsStore
 import com.weenas.castbay.util.Diagnostics
 import com.weenas.castbay.util.Log
 
@@ -21,9 +21,10 @@ object ReceiverStarter {
             Diagnostics.record("start", "$why: already receiving")
             return
         }
-        // A debug build beside the release app waits to be opened for a test.
-        if (BuildConfig.DEBUG) {
-            Diagnostics.record("start", "$why: debug build, not started")
+        // Off in Settings (a debug build beside the release app starts with it off, so the two
+        // don't fight over the ports): the app brings the receiver up when it is opened instead.
+        if (!ReceiverSettingsStore(context).load().startOnBoot) {
+            Diagnostics.record("start", "$why: start at boot is off")
             return
         }
         try {

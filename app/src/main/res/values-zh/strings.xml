@@ -84,6 +84,8 @@
     <string name="section_general">通用</string>
     <string name="setting_language">语言</string>
     <string name="language_system">跟随系统</string>
+    <string name="setting_start_on_boot">开机自动启动</string>
+    <string name="setting_start_on_boot_note">电视开机后接收端立即在后台运行，不显示界面：手机和应用不必先打开映湾就能搜到它。状态栏会保留一条通知，这是系统对常驻服务的要求。如果电视有自启动限制，需要在系统设置里允许映湾。</string>
     <string name="setting_check_updates">检查更新</string>
     <string name="setting_test_versions">接收测试版本</string>
     <string name="setting_test_versions_note">有测试版本（标注 beta）发布时也会提示更新，用来帮忙验证修复。测试版可能不够稳定，下一个正式版会替换它。会向 GitHub 查询，不会发送这台电视的任何信息。</string>

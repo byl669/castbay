@@ -1,6 +1,7 @@
 package com.weenas.castbay.service
 
 import android.content.Context
+import com.weenas.castbay.BuildConfig
 
 data class ReceiverSettings(
     /** The name the user chose; senders see [advertisedName]. */
@@ -39,6 +40,12 @@ data class ReceiverSettings(
     val showLyrics: Boolean = false,
     /** Open the app's screen when a picture starts while it is not on screen (needs "Display over other apps"). */
     val openOnCast: Boolean = false,
+    /**
+     * Start the receiver with the TV (a boot, a wake) with no screen, so senders find it without
+     * anyone opening the app first. On for release builds, as on an Apple TV; a debug build beside
+     * a release one starts off, so the two don't fight over the ports, and can be turned on.
+     */
+    val startOnBoot: Boolean = !BuildConfig.DEBUG,
     /** The app's language: [LANGUAGE_SYSTEM] (the TV's), [LANGUAGE_ZH] or [LANGUAGE_EN]. */
     val language: String = LANGUAGE_SYSTEM,
     /** Look for a newer CastBay on GitHub once a day (UpdateChecker). */
@@ -88,7 +95,7 @@ data class ReceiverSettings(
 
     private fun withoutLiveSettings() = copy(
         showStats = false, pictureMode = PICTURE_FIT, showLyrics = false, openOnCast = false, language = LANGUAGE_SYSTEM, checkUpdates = true, testVersions = false,
-        sendErrorReports = false, screenSaver = SCREEN_SAVER_BURN_IN
+        sendErrorReports = false, screenSaver = SCREEN_SAVER_BURN_IN, startOnBoot = !BuildConfig.DEBUG
     )
 
     /** Frames per second senders may mirror at. "Auto" is 60: TVs decode in hardware. */
@@ -167,6 +174,7 @@ class ReceiverSettingsStore(context: Context) {
             ?.takeIf { it in ReceiverSettings.PICTURE_MODES } ?: ReceiverSettings.PICTURE_FIT,
         showLyrics = preferences.getBoolean("show_lyrics", false),
         openOnCast = preferences.getBoolean("open_on_cast", false),
+        startOnBoot = preferences.getBoolean("start_on_boot", !BuildConfig.DEBUG),
         language = preferences.getString("language", null)
             ?.takeIf { it in ReceiverSettings.LANGUAGES } ?: ReceiverSettings.LANGUAGE_SYSTEM,
         checkUpdates = preferences.getBoolean("check_updates", true),
@@ -196,8 +204,9 @@ class ReceiverSettingsStore(context: Context) {
             .putBoolean("allow_takeover", settings.allowTakeover)
             .putBoolean("dlna_enabled", settings.dlnaEnabled)
             .putBoolean("desktop_enabled", settings.desktopEnabled)
-            // Receiving can no longer be turned off (Back twice on the home screen quits).
-            .remove("start_on_boot")
+            // Receiving itself can no longer be turned off (Back twice on the home screen quits),
+            // but whether it comes back by itself after a boot can be.
+            .putBoolean("start_on_boot", settings.startOnBoot)
             .putBoolean("show_stats", settings.showStats)
             .putString("picture_mode", settings.pictureMode)
             .putBoolean("show_lyrics", settings.showLyrics)

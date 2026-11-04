@@ -116,7 +116,10 @@ class AirPlayService : Service() {
                     else com.weenas.castbay.R.string.notification_waiting
                 )
             ))
-        return START_NOT_STICKY
+        // Sticky: if Android ends the process for memory, the receiver comes back by itself, as a
+        // TV that is on should stay discoverable. Stopping it on purpose still sticks: that path
+        // returns START_NOT_STICKY above.
+        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

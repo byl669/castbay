@@ -82,6 +82,8 @@
     <string name="section_general">General</string>
     <string name="setting_language">Language</string>
     <string name="language_system">System</string>
+    <string name="setting_start_on_boot">Start at Boot</string>
+    <string name="setting_start_on_boot_note">The receiver runs as soon as the TV is on, with no screen: phones and apps find it without anyone opening CastBay first. A notification stays in the status bar, which Android requires of a service that keeps running. If the TV limits auto-start, allow CastBay there.</string>
     <string name="setting_check_updates">Check for Updates</string>
     <string name="setting_test_versions">Test Versions</string>
     <string name="setting_test_versions_note">Also offers test versions of CastBay (marked beta) when one is published, to help check a fix. They may be less stable; the next release replaces them. Asks GitHub; nothing about this TV is sent.</string>
